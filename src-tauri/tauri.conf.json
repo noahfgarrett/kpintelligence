@@ -1,0 +1,64 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "QCx Intelligence",
+  "version": "0.1.0",
+  "identifier": "com.noahgarrett.qcxintelligence",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://127.0.0.1:5274",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build:web"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "QCx Intelligence",
+        "width": 1500,
+        "height": 980,
+        "minWidth": 1120,
+        "minHeight": 720,
+        "resizable": true,
+        "fullscreen": false,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost blob: data:; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost; font-src 'self' data:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Business",
+    "shortDescription": "Local-first construction quality dashboards",
+    "longDescription": "QCx Intelligence connects to locally synchronized report folders and turns project quality data into interactive dashboards, PDF reports, and PowerPoint decks.",
+    "publisher": "Noah Garrett",
+    "copyright": "Copyright 2026 Noah Garrett",
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE3Qzk0MjkzNTQwMDVFRjQKUldUMFhnQlVrMExKRjBKZmpYSk52RllMQm1qYWY2MGQvRy8rTTBSNVYwWkJ3Q0RGallYOWxQalAK",
+      "endpoints": [
+        "https://github.com/noahfgarrett/qcx-intelligence-releases/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}
