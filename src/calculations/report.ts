@@ -398,11 +398,15 @@ function buildIssueTable(
 function buildElectrical(records: InspectionRecord[], reportWeek: WorkWeek): ElectricalPoint[] {
   const weeks = enumerateWorkWeeks(START_WEEK, reportWeek)
   return weeks.map((week) => {
-    const rows = records.filter((row) => row.workWeek?.label === week.label)
+    const finalRows = records.filter((row) =>
+      row.workWeek?.label === week.label && phaseEquals(row.phase, 'Final'),
+    )
     return {
       workWeek: week.label,
-      finals: rows.filter((row) => phaseEquals(row.phase, 'Final')).length,
-      issuesFound: rows.filter((row) => row.issue && row.issue.trim().toLowerCase() !== 'no issue found').length,
+      finals: finalRows.length,
+      issuesFound: finalRows.filter((row) =>
+        row.issue && row.issue.trim().toLowerCase() !== 'no issue found',
+      ).length,
     }
   })
 }

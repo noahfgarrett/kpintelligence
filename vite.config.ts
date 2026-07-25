@@ -12,7 +12,7 @@ const pkg = JSON.parse(readFileSync('package.json', 'utf-8')) as {
 function repoSlug(): string {
   const raw = typeof pkg.repository === 'string' ? pkg.repository : pkg.repository?.url
   const match = raw?.match(/github\.com[:/](.+?)(?:\.git)?$/)
-  return match?.[1] ?? 'noahfgarrett/qcx-intelligence'
+  return match?.[1] ?? 'noahfgarrett/kpintelligence'
 }
 
 export default defineConfig(({ mode }) => ({

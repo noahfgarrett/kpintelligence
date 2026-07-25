@@ -2200,6 +2200,16 @@ select:disabled {
   border-color: rgba(46, 90, 172, 0.22);
 }
 
+.update-status.has-error {
+  background: #fef3f2;
+  border-color: #fecdca;
+}
+
+.update-status.has-error .update-status-icon {
+  background: #fee4e2;
+  color: #b42318;
+}
+
 .update-status-icon {
   align-items: center;
   background: var(--surface);

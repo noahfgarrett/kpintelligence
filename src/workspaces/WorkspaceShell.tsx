@@ -278,7 +278,7 @@ export default function WorkspaceShell() {
     return (
       <div className="shell-loading">
         <span className="shell-loading-mark"><ShieldCheck size={28} /></span>
-        <strong>QCx Intelligence</strong>
+        <strong>KPIntelligence</strong>
         <RefreshCw className="spin" size={18} />
       </div>
     )
@@ -308,7 +308,7 @@ export default function WorkspaceShell() {
         <div className="shell-brand">
           <span><ShieldCheck size={23} /></span>
           <div>
-            <h1>QCx Intelligence</h1>
+            <h1>KPIntelligence</h1>
             <p>Project reporting workspaces</p>
           </div>
         </div>

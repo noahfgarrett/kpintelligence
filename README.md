@@ -1,15 +1,42 @@
-# QCx Intelligence
+# KPIntelligence
 
-Local-first construction quality reporting for Windows and macOS. Created by Noah Garrett.
+Local-first spreadsheet intelligence for Windows and macOS. Created by Noah Garrett.
 
-QCx Intelligence saves project workspaces, monitors locally synced SharePoint or OneDrive folders, and turns weekly Smartsheet exports into interactive dashboards, PDF reports, and editable PowerPoint decks. The first built-in template is Weekly QA/QC.
+KPIntelligence turns spreadsheets in locally synced SharePoint or OneDrive folders into interactive dashboards, PDF reports, and presentation-ready PowerPoint decks. It is designed around click-to-build data sentences instead of formulas or a separate measures language.
 
-## Data Model
+The production OAC Weekly QA/QC dashboard is the first featured template and remains available alongside user-created dashboards.
 
-- Workspace metadata and slicer settings are stored in the app data directory.
-- Source folder permission is restored by Tauri's persisted filesystem scope.
+The general dashboard studio is labeled **beta** in v0.2.0. It already supports local spreadsheet profiling, click-to-build calculations, global filters, 18 visual types, drag-and-resize pages, row drill-through, and configurable exports. Guarded joins, reusable calculated fields, richer prior-period comparisons, and native editable PowerPoint text and table objects remain roadmap work.
+
+## Product Model
+
+```text
+Library
+  -> nested folders
+    -> projects
+      -> connected source folders
+      -> featured or custom dashboards
+        -> pages
+          -> draggable and resizable widgets
+```
+
+Custom visuals use a visible query sentence such as:
+
+```text
+Count ID from Electrical Inspection Log
+grouped by Work Week Observed
+where Inspection Phase is Final
+```
+
+Every custom visual keeps its source and rule sentence visible, reports matched-row counts, and can reveal contributing rows.
+
+## Local-First Data
+
+- Absolute SharePoint and OneDrive paths stay only in app data under the user's local operating-system profile.
 - Spreadsheet rows are read into memory and are not copied into an application database.
-- A failed or partial folder refresh leaves the last good report visible.
+- Dashboard definitions persist separately from source data.
+- Incomplete syncs never replace the last valid source snapshot.
+- Future portable workspace packages must exclude absolute paths and raw source rows.
 
 ## Development
 
@@ -23,7 +50,7 @@ npm test
 npm run tauri:dev
 ```
 
-The Vite preview runs on `http://127.0.0.1:5274`. Browser mode supports manual imports and layout preview; persistent folder monitoring and native saves require the Tauri app.
+The Vite preview runs on `http://127.0.0.1:5274`. Browser mode supports layout and manual-file testing. Persistent folder monitoring, native saves, and signed updates require the desktop app.
 
 ## Build
 
@@ -32,19 +59,21 @@ npm run build:web
 npm run tauri:build
 ```
 
-Updater bundles require the signing key stored outside this repository:
+Updater bundles use the existing signing identity so QCx Intelligence installations can migrate in place:
 
 ```bash
-TAURI_SIGNING_PRIVATE_KEY="$(< "$HOME/.tauri/qcx-intelligence.key")" npm run tauri:build
+TAURI_SIGNING_PRIVATE_KEY="$(< "$HOME/.tauri/kpintelligence.key")" npm run tauri:build
 ```
 
 ## Releases
 
-Source is intended for the private `noahfgarrett/qcx-intelligence` repository. Installers, signatures, and `latest.json` publish to the public `noahfgarrett/qcx-intelligence-releases` repository.
+Private source: `noahfgarrett/kpintelligence`
 
-The release workflow expects these source-repository secrets:
+Public installers and update metadata: `noahfgarrett/kpintelligence-releases`
 
-- `RELEASE_REPO_TOKEN`: fine-grained token with Contents write access to the release repository.
+Required source-repository secrets:
+
+- `RELEASE_REPO_TOKEN`: token with Contents write access to the release repository.
 - `TAURI_SIGNING_PRIVATE_KEY`: updater private key.
 
-Production distribution should add Apple notarization and Windows code-signing credentials before broad rollout.
+The Tauri bundle identifier remains stable during the rename so current installations receive KPIntelligence as an update.

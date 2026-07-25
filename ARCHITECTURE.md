@@ -1,43 +1,84 @@
-# Architecture
+# KPIntelligence Architecture
 
 ## Layers
 
 ```text
-Workspace UI
-  -> versioned dashboard templates
-    -> report calculations and source normalization
-      -> PlatformBridge
-        -> Tauri adapter (current desktop host)
-        -> Browser adapter (development and portable preview)
-        -> Electron adapter (future PDF application host)
+Library shell
+  -> project and dashboard documents
+    -> dashboard studio / featured templates
+      -> typed query engine and renderer registry
+        -> source catalog and snapshot cache
+          -> PlatformBridge
+            -> Tauri adapter
+            -> Browser adapter
+            -> Electron adapter (future)
 ```
 
-## Platform Boundary
+## Persistence Boundaries
 
-`src/platform/types.ts` is the host contract. Templates must not import Tauri APIs directly. The bridge owns:
+Three persistence concerns stay separate:
 
-- folder selection and recursive file discovery
-- filesystem watching and byte reads
-- workspace-state persistence
-- native save dialogs
-- signed update checks, installation, and relaunch
+1. **Library document:** folders, projects, dashboard definitions, themes, layouts, and export profiles.
+2. **Private host state:** absolute source paths, recent locations, local permissions, and user filter state. This remains in the application data under the local operating-system user profile.
+3. **Disposable runtime cache:** source snapshots, inferred schemas, query results, and diagnostics.
 
-The Tauri implementation lives in `src/platform/tauri.ts`. A future Electron host can provide the same interface with IPC-backed methods.
+Raw spreadsheet rows are never written into the library document. Portable dashboard or workspace packages are future work and must exclude absolute paths and raw spreadsheet rows.
 
-## Workspace State
+## Library Hierarchy
 
-`WorkspaceRecord` is schema-versioned. Version 1 stores the workspace identity, template identity/version, source folder path, slicers, and timestamps. Raw spreadsheet rows and generated reports are intentionally excluded.
+Folders can nest recursively. Projects belong to folders and own source connections. Dashboards belong to projects. The current dashboard kinds are:
+
+- `oacWeekly`: the featured production OAC Weekly QA/QC dashboard.
+- `custom`: a user-authored beta studio dashboard document.
+
+Stable IDs survive renames and moves.
+
+## Query Safety
+
+Visual logic compiles to a typed abstract syntax tree. It never evaluates JavaScript or arbitrary formulas.
+
+```text
+sentence controls
+  -> typed predicate and aggregation AST
+    -> validation and field resolution
+      -> bounded query plan
+        -> result rows, groups, values, and diagnostics
+```
+
+Operators are type-aware. Ambiguous multi-row lookups require an explicit first, last, list, count, aggregate, or error policy. Every execution reports matched and excluded rows.
 
 ## Source Refresh
 
-1. Scan recursively for ZIP, XLS, XLSX, and CSV files.
-2. Ignore hidden files, lock files, and partial sync artifacts.
-3. Require two identical scans before reading.
-4. Prefer the newest ZIP that resolves all four required report roles.
-5. Otherwise choose the newest valid direct file for each role.
-6. Publish the snapshot only after the complete import succeeds.
+1. Recursively catalog supported ZIP, XLS, XLSX, and CSV files.
+2. Ignore hidden, lock, temporary, and partial-sync artifacts.
+3. Require stable file fingerprints before reading.
+4. Resolve each logical source binding independently.
+5. Parse typed values and infer fields with confidence and samples.
+6. Publish a new consistency-group snapshot only after every required source succeeds.
 7. Keep the previous snapshot on any error.
 
-## Template Ownership
+The OAC template uses a four-source consistency group. Custom dashboards may use one or more independent sources.
 
-Weekly QA/QC currently uses shared modules in `src/calculations`, `src/services/fileImport.ts`, and `src/export`. As more templates are added, these modules should move under a template package with a small registry. The platform bridge and workspace repository should remain unchanged.
+## Rendering
+
+KPIntelligence owns a safe visual schema and translates it through a renderer registry:
+
+- Apache ECharts renders analytical charts using SVG by default.
+- React renderers own KPI, table, text, image, and filter widgets.
+- React Grid Layout owns collision-aware drag, resize, and serialized positions.
+
+Raw ECharts options are never persisted. Screen and export paths consume one resolved page model to reduce visual drift.
+
+## Platform Boundary
+
+`src/platform/types.ts` defines folder selection, recursive file reads, watching, persistence, native save dialogs, and signed update installation. Templates and query code cannot import Tauri APIs.
+
+The Tauri identifier and updater key stay stable through the QCx-to-KPIntelligence transition. A future Electron adapter implements the same capabilities through IPC.
+
+## Migrations
+
+Migrations are sequential and transactional. Unknown future documents open read-only. The legacy QCx workspace migrator creates:
+
+- A root project using the saved name and source-folder binding.
+- An OAC Weekly QA/QC dashboard instance.
+- Preserved report filters and timestamps.

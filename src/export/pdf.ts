@@ -104,7 +104,7 @@ export async function exportSlidesPdf(report: ReportModel): Promise<GeneratedRep
 
   return {
     data: new Uint8Array(pdf.output('arraybuffer')),
-    fileName: `QCx Weekly QAQC Report ${report.reportWeek.label.replace("'", '-')}.pdf`,
+    fileName: `KPIntelligence Weekly QAQC Report ${report.reportWeek.label.replace("'", '-')}.pdf`,
     filters: [{ name: 'PDF document', extensions: ['pdf'] }],
   }
 }

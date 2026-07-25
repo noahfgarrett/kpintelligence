@@ -1,11 +1,11 @@
 {
-  "name": "qcx-intelligence",
+  "name": "kpintelligence",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://github.com/noahfgarrett/qcx-intelligence.git"
+    "url": "https://github.com/noahfgarrett/kpintelligence.git"
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5274",
@@ -14,7 +14,8 @@
     "check:version": "node scripts/check-version.mjs",
     "preview": "vite preview",
     "typecheck": "tsc -b",
-    "test": "vitest run",
+    "test": "vitest run src",
+    "test:e2e": "playwright test",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
@@ -26,6 +27,7 @@
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-store": "^2.4.3",
     "@tauri-apps/plugin-updater": "^2.10.1",
+    "echarts": "^6.1.0",
     "fflate": "^0.8.3",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
@@ -33,10 +35,12 @@
     "pptxgenjs": "^4.0.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-grid-layout": "^2.2.3",
     "vite-plugin-singlefile": "^2.0.3",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.0",
     "@tauri-apps/cli": "^2.11.4",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

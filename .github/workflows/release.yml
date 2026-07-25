@@ -30,15 +30,18 @@ jobs:
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
       - run: npm ci
       - run: npm run check:version
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build:web
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         with:
           owner: noahfgarrett
-          repo: qcx-intelligence-releases
+          repo: kpintelligence-releases
           tagName: v__VERSION__
-          releaseName: QCx Intelligence v__VERSION__
+          releaseName: KPIntelligence v__VERSION__
           releaseBody: See the in-app changelog for release details.
           releaseCommitish: main
           releaseDraft: false

@@ -7,4 +7,4 @@ if (packageJson.version !== tauriConfig.version) {
   throw new Error(`Version mismatch: package.json=${packageJson.version}, tauri.conf.json=${tauriConfig.version}`)
 }
 
-process.stdout.write(`QCx Intelligence version ${packageJson.version}\n`)
+process.stdout.write(`KPIntelligence version ${packageJson.version}\n`)

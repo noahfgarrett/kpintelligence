@@ -38,6 +38,7 @@ import { clearLegacyConnectionData, loadFilters, saveFilters } from '@/services/
 import { checkForUpdate } from '@/services/updateChecker'
 import { installUpdate } from '@/services/updateDownload'
 import { platform } from '@/platform'
+import { useModalFocus } from '@/hooks/useModalFocus'
 import type {
   AgingBucket,
   ElectricalPoint,
@@ -111,14 +112,18 @@ function Modal({
   onClose: () => void
   wide?: boolean
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useModalFocus(open, dialogRef, onClose)
   if (!open) return null
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <div
+        ref={dialogRef}
         className={cx('modal', wide && 'modal-wide')}
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        tabIndex={-1}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="modal-header">
@@ -139,6 +144,7 @@ export function UpdateModal({
   info,
   defaultTab,
   checking,
+  checkError,
   lastChecked,
   onCheck,
 }: {
@@ -147,6 +153,7 @@ export function UpdateModal({
   info: UpdateInfo | null
   defaultTab: 'update' | 'changelog'
   checking: boolean
+  checkError?: string | null
   lastChecked: Date | null
   onCheck: () => Promise<void>
 }) {
@@ -231,7 +238,7 @@ export function UpdateModal({
             <span className="update-success-icon"><CheckCircle2 size={30} /></span>
             <div>
               <strong>Update installed</strong>
-              <p>QCx Intelligence will reopen on v{info.version}.</p>
+              <p>KPIntelligence will reopen on v{info.version}.</p>
             </div>
             <div className="update-next-step">
               Workspace settings stay in place. Source spreadsheets remain in their selected synced folders.
@@ -294,11 +301,24 @@ export function UpdateModal({
         )
       ) : (
         <div className="changelog-panel">
-          <div className={cx('update-status', info && 'has-update')}>
-            <span className="update-status-icon">{info ? <Bell size={18} /> : <CheckCircle2 size={18} />}</span>
+          <div className={cx('update-status', info && 'has-update', checkError && 'has-error')}>
+            <span className="update-status-icon">
+              {info ? <Bell size={18} /> : checkError ? <AlertCircle size={18} /> : <CheckCircle2 size={18} />}
+            </span>
             <div>
-              <strong>{info ? `v${info.version} is available` : `v${__APP_VERSION__} is up to date`}</strong>
-              <span>{lastChecked ? `Last checked ${lastChecked.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'Checks automatically while the app is open'}</span>
+              <strong>
+                {info
+                  ? `v${info.version} is available`
+                  : checkError
+                    ? 'Couldn’t check for updates'
+                    : `v${__APP_VERSION__} is up to date`}
+              </strong>
+              <span>
+                {checkError
+                  || (lastChecked
+                    ? `Last checked ${lastChecked.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+                    : 'Checks automatically while the app is open')}
+              </span>
             </div>
             <button className="button secondary compact" type="button" disabled={checking} onClick={() => void onCheck()}>
               <RefreshCw size={14} className={cx(checking && 'spin')} />
@@ -1317,6 +1337,7 @@ export interface DashboardWorkspaceContext {
   workspaceName: string
   sourceStatus: string
   sourceMessage?: string
+  backLabel?: string
   onShowWorkspaces: () => void
   onRefresh: () => void
 }
@@ -1326,9 +1347,16 @@ export interface AppProps {
   initialFilters?: Partial<ReportFilters>
   onFiltersChange?: (filters: ReportFilters) => void
   workspaceContext?: DashboardWorkspaceContext
+  disableUpdateChecks?: boolean
 }
 
-export default function App({ autoImport, initialFilters, onFiltersChange, workspaceContext }: AppProps = {}) {
+export default function App({
+  autoImport,
+  initialFilters,
+  onFiltersChange,
+  workspaceContext,
+  disableUpdateChecks = false,
+}: AppProps = {}) {
   const [bundle, setBundle] = useState<SheetBundle>(EMPTY_BUNDLE)
   const [filters, setFilters] = useState<ReportFilters>(() => mergeFilters(initialFilters ?? loadFilters()))
   const [activeSlide, setActiveSlide] = useState<'overview' | 'issues' | 'field'>('overview')
@@ -1342,11 +1370,17 @@ export default function App({ autoImport, initialFilters, onFiltersChange, works
   const [updateOpen, setUpdateOpen] = useState(false)
   const [updateDefaultTab, setUpdateDefaultTab] = useState<'update' | 'changelog'>('changelog')
   const [updateChecking, setUpdateChecking] = useState(false)
+  const [updateCheckError, setUpdateCheckError] = useState<string | null>(null)
   const [lastUpdateCheck, setLastUpdateCheck] = useState<Date | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
   const dismissedUpdateVersionRef = useRef<string | null>(null)
   const autoImportFingerprintRef = useRef<string | null>(null)
+  const importGenerationRef = useRef(0)
+  const importsRef = useRef(imports)
+  importsRef.current = imports
+  const onFiltersChangeRef = useRef(onFiltersChange)
+  onFiltersChangeRef.current = onFiltersChange
   const importCount = Object.keys(imports).length
   const filesReady = importCount === 4
   const hasReport = bundle.source === 'files' || bundle.source === 'demo'
@@ -1359,25 +1393,30 @@ export default function App({ autoImport, initialFilters, onFiltersChange, works
   )
 
   useEffect(() => {
-    if (onFiltersChange) onFiltersChange(filters)
+    if (onFiltersChangeRef.current) onFiltersChangeRef.current(filters)
     else saveFilters(filters)
-  }, [filters, onFiltersChange])
+  }, [filters])
 
   useEffect(() => {
     clearLegacyConnectionData()
   }, [])
 
   useEffect(() => {
-    if (!import.meta.env.PROD) return
+    if (!import.meta.env.PROD || disableUpdateChecks) return
     let active = true
     const poll = async (): Promise<void> => {
-      const info = await checkForUpdate()
-      if (!active) return
-      setUpdateInfo(info)
-      setLastUpdateCheck(new Date())
-      if (info && dismissedUpdateVersionRef.current !== info.version) {
-        setUpdateDefaultTab('update')
-        setUpdateOpen(true)
+      try {
+        const info = await checkForUpdate()
+        if (!active) return
+        setUpdateInfo(info)
+        setUpdateCheckError(null)
+        setLastUpdateCheck(new Date())
+        if (info && dismissedUpdateVersionRef.current !== info.version) {
+          setUpdateDefaultTab('update')
+          setUpdateOpen(true)
+        }
+      } catch {
+        if (active) setUpdateCheckError('Check your network or proxy, then try again.')
       }
     }
     void poll()
@@ -1391,11 +1430,12 @@ export default function App({ autoImport, initialFilters, onFiltersChange, works
       window.clearInterval(interval)
       document.removeEventListener('visibilitychange', handleVisibility)
     }
-  }, [])
+  }, [disableUpdateChecks])
 
   async function handleManualUpdateCheck(): Promise<void> {
     if (updateChecking) return
     setUpdateChecking(true)
+    setUpdateCheckError(null)
     try {
       const info = await checkForUpdate()
       setUpdateInfo(info)
@@ -1404,6 +1444,8 @@ export default function App({ autoImport, initialFilters, onFiltersChange, works
         dismissedUpdateVersionRef.current = null
         setUpdateDefaultTab('update')
       }
+    } catch {
+      setUpdateCheckError('Check your network or proxy, then try again.')
     } finally {
       setUpdateChecking(false)
     }
@@ -1422,14 +1464,18 @@ export default function App({ autoImport, initialFilters, onFiltersChange, works
     }
   }
 
-  async function handleFiles(files: File[]): Promise<void> {
+  async function handleFiles(files: File[], replaceExisting = false): Promise<void> {
     if (files.length === 0) return
+    const generation = importGenerationRef.current + 1
+    importGenerationRef.current = generation
+    const isCurrent = () => importGenerationRef.current === generation
     setImporting(true)
     setError(null)
     try {
       const expandedFiles = await expandImportFiles(files)
       const results = await Promise.allSettled(expandedFiles.map(importSpreadsheet))
-      const next = { ...imports }
+      if (!isCurrent()) return
+      const next = replaceExisting ? {} : { ...importsRef.current }
       const errors: string[] = []
       results.forEach((result) => {
         if (result.status === 'fulfilled') next[result.value.role] = result.value
@@ -1444,16 +1490,29 @@ export default function App({ autoImport, initialFilters, onFiltersChange, works
         setError(errors.join(' '))
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to import the selected spreadsheets.')
+      if (isCurrent()) {
+        setError(err instanceof Error ? err.message : 'Unable to import the selected spreadsheets.')
+      }
     } finally {
-      setImporting(false)
+      if (isCurrent()) setImporting(false)
     }
   }
 
   useEffect(() => {
-    if (!autoImport || autoImport.fingerprint === autoImportFingerprintRef.current) return
+    if (!autoImport) {
+      if (autoImportFingerprintRef.current === null) return
+      importGenerationRef.current += 1
+      autoImportFingerprintRef.current = null
+      setImports({})
+      setBundle(EMPTY_BUNDLE)
+      setImporting(false)
+      setSheetPanelOpen(true)
+      setError(null)
+      return
+    }
+    if (autoImport.fingerprint === autoImportFingerprintRef.current) return
     autoImportFingerprintRef.current = autoImport.fingerprint
-    void handleFiles(autoImport.files)
+    void handleFiles(autoImport.files, true)
   }, [autoImport?.fingerprint])
 
   async function handleDrop(dataTransfer: DataTransfer): Promise<void> {
@@ -1462,25 +1521,30 @@ export default function App({ autoImport, initialFilters, onFiltersChange, works
     try {
       const droppedFiles = await filesFromDrop(dataTransfer)
       if (droppedFiles.length === 0) throw new Error('The dropped folder did not contain any files.')
+      setImporting(false)
       await handleFiles(droppedFiles)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to read the dropped folder.')
-    } finally {
       setImporting(false)
     }
   }
 
   function removeImport(role: SheetRole): void {
+    importGenerationRef.current += 1
     const next = { ...imports }
     delete next[role]
     setImports(next)
     setBundle(bundleForImports(next))
+    setImporting(false)
     setSheetPanelOpen(true)
   }
 
   function clearImports(): void {
+    importGenerationRef.current += 1
+    autoImportFingerprintRef.current = null
     setImports({})
     setBundle(EMPTY_BUNDLE)
+    setImporting(false)
     setSheetPanelOpen(true)
     setError(null)
   }
@@ -1521,7 +1585,7 @@ export default function App({ autoImport, initialFilters, onFiltersChange, works
             <ShieldCheck size={22} />
           </div>
           <div>
-            <h1>QCx Intelligence</h1>
+            <h1>KPIntelligence</h1>
             <p>{workspaceContext
               ? `${workspaceContext.workspaceName} - ${hasReport ? `report through ${report.reportWeek.label}` : 'preparing weekly report'}`
               : hasReport ? `Weekly report through ${report.reportWeek.label}` : 'Import weekly exports to generate a report'}</p>
@@ -1545,10 +1609,10 @@ export default function App({ autoImport, initialFilters, onFiltersChange, works
           {workspaceContext && (
             <button className="icon-button labeled" type="button" onClick={workspaceContext.onShowWorkspaces}>
               <ArrowLeft size={16} />
-              Workspaces
+              {workspaceContext.backLabel ?? 'Library'}
             </button>
           )}
-          <button
+          {!disableUpdateChecks && <button
             className={cx('icon-button labeled update-button', updateInfo && 'has-update')}
             type="button"
             onClick={() => {
@@ -1559,7 +1623,7 @@ export default function App({ autoImport, initialFilters, onFiltersChange, works
             <Bell size={16} />
             Updates
             {updateInfo && <span className="update-badge">v{updateInfo.version}</span>}
-          </button>
+          </button>}
           {hasReport && (
             <button
               className="icon-button labeled"
@@ -1719,6 +1783,8 @@ export default function App({ autoImport, initialFilters, onFiltersChange, works
               onChooseFolder={() => folderInputRef.current?.click()}
               onDrop={(dataTransfer) => void handleDrop(dataTransfer)}
               onPreview={() => {
+                importGenerationRef.current += 1
+                setImporting(false)
                 setBundle(PREVIEW_BUNDLE)
                 setActiveSlide('overview')
                 setSheetPanelOpen(false)
@@ -1737,6 +1803,7 @@ export default function App({ autoImport, initialFilters, onFiltersChange, works
         info={updateInfo}
         defaultTab={updateDefaultTab}
         checking={updateChecking}
+        checkError={updateCheckError}
         lastChecked={lastUpdateCheck}
         onCheck={handleManualUpdateCheck}
       />

@@ -1,4 +1,4 @@
-# QCx Intelligence Design System
+# KPIntelligence Design System
 
 Design system for the app and the exported PPTX/PDF deck. The data-viz series
 colors are the exact hex values validated by the dataviz skill's

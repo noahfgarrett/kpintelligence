@@ -634,7 +634,7 @@ export async function exportReportDeck(report: ReportModel): Promise<GeneratedRe
   pptx.author = 'Noah Garrett'
   pptx.subject = `Weekly report through ${report.reportWeek.label}`
   pptx.title = `QA/QC Weekly Report ${report.reportWeek.label}`
-  pptx.company = 'QCx Intelligence'
+  pptx.company = 'KPIntelligence'
   pptx.theme = {
     headFontFace: 'Aptos Display',
     bodyFontFace: 'Aptos',
@@ -702,7 +702,7 @@ export async function exportReportDeck(report: ReportModel): Promise<GeneratedRe
     : new Blob([output as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' })
   return {
     data: new Uint8Array(await blob.arrayBuffer()),
-    fileName: `QCx Weekly QAQC Report ${report.reportWeek.label.replace("'", '-')}.pptx`,
+    fileName: `KPIntelligence Weekly QAQC Report ${report.reportWeek.label.replace("'", '-')}.pptx`,
     filters: [{ name: 'PowerPoint presentation', extensions: ['pptx'] }],
   }
 }

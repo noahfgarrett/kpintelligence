@@ -9,6 +9,19 @@ function workbookFile(name: string, rows: Record<string, string>[]): File {
   return new File([bytes], name, { lastModified: 1 })
 }
 
+function workbookWithSheetCount(name: string, count: number): File {
+  const workbook = XLSX.utils.book_new()
+  Array.from({ length: count }, (_, index) => {
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.aoa_to_sheet([['Value'], [index]]),
+      `Sheet ${index + 1}`,
+    )
+  })
+  const bytes = XLSX.write(workbook, { type: 'array', bookType: 'xlsx' })
+  return new File([bytes], name, { lastModified: 1 })
+}
+
 describe('Smartsheet export identification', () => {
   it('maps underscore-separated Electrical export names', async () => {
     const imported = await importSpreadsheet(workbookFile('Electrical_Inspection_Log.xlsx', [{
@@ -27,5 +40,11 @@ describe('Smartsheet export identification', () => {
       SIGNATURE: 'Inspector',
     }]))
     expect(imported.role).toBe('welding')
+  })
+
+  it('rejects workbooks with unsafe worksheet counts', async () => {
+    await expect(importSpreadsheet(
+      workbookWithSheetCount('Electrical_Inspection_Log.xlsx', 101),
+    )).rejects.toThrow(/more than 100 worksheets/i)
   })
 })

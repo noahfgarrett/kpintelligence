@@ -1,9 +1,10 @@
 import type { DesktopUpdateInfo, PlatformBridge, SaveFileFilter, SourceFileDescriptor } from './types'
 
-const STORAGE_PREFIX = 'qcx-intelligence:'
+const STORAGE_PREFIX = 'kpintelligence:'
+const LEGACY_STORAGE_PREFIX = 'qcx-intelligence:'
 
 function unavailable(): never {
-  throw new Error('Persistent folder access is available in the QCx Intelligence desktop app.')
+  throw new Error('Persistent folder access is available in the KPIntelligence desktop app.')
 }
 
 export const browserPlatform: PlatformBridge = {
@@ -22,12 +23,16 @@ export const browserPlatform: PlatformBridge = {
     return () => undefined
   },
   async loadState<T>(key: string): Promise<T | null> {
-    const raw = localStorage.getItem(`${STORAGE_PREFIX}${key}`)
+    const storageKey = `${STORAGE_PREFIX}${key}`
+    const raw = localStorage.getItem(storageKey)
+      ?? localStorage.getItem(`${LEGACY_STORAGE_PREFIX}${key}`)
     if (!raw) return null
     try {
-      return JSON.parse(raw) as T
+      const parsed = JSON.parse(raw) as T
+      localStorage.setItem(storageKey, raw)
+      return parsed
     } catch {
-      return null
+      throw new Error('Saved KPIntelligence data is not valid JSON. It was left untouched so it can be recovered.')
     }
   },
   async saveState<T>(key: string, value: T): Promise<void> {

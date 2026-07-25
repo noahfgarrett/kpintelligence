@@ -13,6 +13,11 @@ const SUPPORTED_EXTENSIONS = ['.xls', '.xlsx', '.csv']
 const MAX_ZIP_BYTES = 250 * 1024 * 1024
 const MAX_UNZIPPED_FILE_BYTES = 100 * 1024 * 1024
 const MAX_UNZIPPED_TOTAL_BYTES = 400 * 1024 * 1024
+const MAX_IMPORT_FILE_BYTES = 100 * 1024 * 1024
+const MAX_WORKBOOK_WORKSHEETS = 100
+const MAX_WORKSHEET_ROWS = 250_000
+const MAX_WORKSHEET_COLUMNS = 10_000
+const MAX_WORKSHEET_RANGE_CELLS = 3_000_000
 const KNOWN_HEADERS = new Set([
   'id',
   'status',
@@ -187,6 +192,23 @@ function headerScore(row: unknown[]): number {
 }
 
 function parseWorksheet(name: string, worksheet: XLSX.WorkSheet): ParsedWorksheet | null {
+  if (worksheet['!ref']) {
+    let range: XLSX.Range
+    try {
+      range = XLSX.utils.decode_range(worksheet['!ref'])
+    } catch {
+      throw new Error(`${name}: the worksheet range is invalid.`)
+    }
+    const rows = range.e.r - range.s.r + 1
+    const columns = range.e.c - range.s.c + 1
+    if (
+      rows > MAX_WORKSHEET_ROWS
+      || columns > MAX_WORKSHEET_COLUMNS
+      || rows * columns > MAX_WORKSHEET_RANGE_CELLS
+    ) {
+      throw new Error(`${name}: the worksheet is too large to import safely.`)
+    }
+  }
   const matrix = XLSX.utils.sheet_to_json<unknown[]>(worksheet, {
     header: 1,
     defval: '',
@@ -266,6 +288,9 @@ export async function importSpreadsheet(file: File): Promise<ImportedSheetFile> 
   if (!SUPPORTED_EXTENSIONS.includes(extension(file.name))) {
     throw new Error(`${file.name}: use an .xls, .xlsx, or .csv Smartsheet export.`)
   }
+  if (file.size > MAX_IMPORT_FILE_BYTES) {
+    throw new Error(`${file.name}: report files must be smaller than 100 MB.`)
+  }
 
   let workbook: XLSX.WorkBook
   try {
@@ -276,6 +301,9 @@ export async function importSpreadsheet(file: File): Promise<ImportedSheetFile> 
     })
   } catch {
     throw new Error(`${file.name}: the spreadsheet could not be read.`)
+  }
+  if (workbook.SheetNames.length > MAX_WORKBOOK_WORKSHEETS) {
+    throw new Error(`${file.name}: the workbook contains more than ${MAX_WORKBOOK_WORKSHEETS} worksheets.`)
   }
 
   const worksheets = workbook.SheetNames

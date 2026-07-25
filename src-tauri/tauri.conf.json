@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "QCx Intelligence",
-  "version": "0.1.0",
+  "productName": "KPIntelligence",
+  "version": "0.2.0",
   "identifier": "com.noahgarrett.qcxintelligence",
   "build": {
     "frontendDist": "../dist",
@@ -13,10 +13,10 @@
     "windows": [
       {
         "label": "main",
-        "title": "QCx Intelligence",
+        "title": "KPIntelligence",
         "width": 1500,
         "height": 980,
-        "minWidth": 1120,
+        "minWidth": 1320,
         "minHeight": 720,
         "resizable": true,
         "fullscreen": false,
@@ -31,8 +31,8 @@
     "active": true,
     "targets": "all",
     "category": "Business",
-    "shortDescription": "Local-first construction quality dashboards",
-    "longDescription": "QCx Intelligence connects to locally synchronized report folders and turns project quality data into interactive dashboards, PDF reports, and PowerPoint decks.",
+    "shortDescription": "Local-first dashboard intelligence workspaces",
+    "longDescription": "KPIntelligence connects to locally synchronized project folders and turns spreadsheet data into configurable dashboards, PDF reports, and PowerPoint decks.",
     "publisher": "Noah Garrett",
     "copyright": "Copyright 2026 Noah Garrett",
     "createUpdaterArtifacts": true,
@@ -54,7 +54,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE3Qzk0MjkzNTQwMDVFRjQKUldUMFhnQlVrMExKRjBKZmpYSk52RllMQm1qYWY2MGQvRy8rTTBSNVYwWkJ3Q0RGallYOWxQalAK",
       "endpoints": [
-        "https://github.com/noahfgarrett/qcx-intelligence-releases/releases/latest/download/latest.json"
+        "https://github.com/noahfgarrett/kpintelligence-releases/releases/latest/download/latest.json"
       ],
       "windows": {
         "installMode": "passive"
