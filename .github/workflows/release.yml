@@ -174,8 +174,8 @@ jobs:
           assets="$(gh api --paginate "repos/${repo}/releases/${RELEASE_ID}/assets" --jq '.[].name')"
           expected=(
             "KPIntelligence_${RELEASE_VERSION}_universal.dmg"
-            "KPIntelligence_universal.app.tar.gz"
-            "KPIntelligence_universal.app.tar.gz.sig"
+            "KPIntelligence_${RELEASE_VERSION}_universal.app.tar.gz"
+            "KPIntelligence_${RELEASE_VERSION}_universal.app.tar.gz.sig"
             "KPIntelligence_${RELEASE_VERSION}_x64-setup.exe"
             "KPIntelligence_${RELEASE_VERSION}_x64-setup.exe.sig"
             "KPIntelligence_${RELEASE_VERSION}_x64_en-US.msi"
