@@ -80,7 +80,10 @@ jobs:
         run: |
           repo="noahfgarrett/kpintelligence-releases"
           release_body="$(printf 'See the in-app changelog for release details.\n\nSource revision: %s\nWorkflow run: https://github.com/%s/actions/runs/%s' "${GITHUB_SHA}" "${GITHUB_REPOSITORY}" "${GITHUB_RUN_ID}")"
-          release_id="$(gh api "repos/${repo}/releases/tags/${RELEASE_TAG}" --jq '.id' 2>/dev/null || true)"
+          release_id=""
+          if existing_release_id="$(gh api "repos/${repo}/releases/tags/${RELEASE_TAG}" --jq '.id' 2>/dev/null)"; then
+            release_id="${existing_release_id}"
+          fi
           if [[ -n "${release_id}" ]]; then
             is_draft="$(gh api "repos/${repo}/releases/${release_id}" --jq '.draft')"
             if [[ "${is_draft}" != "true" ]]; then
