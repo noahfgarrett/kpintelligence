@@ -1,14 +1,16 @@
 import type { AggregationOperationV1, PredicateConditionV1 } from '../domain/model'
+import type { InferredFieldType } from '../data/types'
 import type { StudioVisualType } from '../renderers/catalog'
 import type { ReportFilters } from '@/types'
 
-export const LIBRARY_SCHEMA_VERSION = 1 as const
+export const LIBRARY_SCHEMA_VERSION = 4 as const
 
 export type LibrarySelection =
   | { kind: 'home'; id: 'home' }
   | { kind: 'folder'; id: string }
   | { kind: 'project'; id: string }
   | { kind: 'dashboard'; id: string }
+  | { kind: 'teamLibrary'; id: string }
 
 export interface LibraryFolderRecord {
   id: string
@@ -28,7 +30,39 @@ export interface ProjectRecord {
   sourceFileCount: number
   sourceDatasetCount: number
   sourceRefreshedAt: string | null
+  sourceRepairs?: ProjectSourceRepairs
   reportFilters?: ReportFilters
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SourceFieldRepairRecord {
+  id: string
+  datasetId: string
+  fieldId: string
+  workbookFileName?: string
+  datasetName?: string
+  worksheetName?: string
+  fieldKey?: string
+  sourceHeader?: string
+  sourceColumnIndex?: number
+  displayName: string | null
+  dataType: InferredFieldType | null
+  updatedAt: string
+}
+
+export interface ProjectSourceRepairs {
+  fieldRepairs: SourceFieldRepairRecord[]
+  reviewedDatasetIds: string[]
+}
+
+export interface TeamLibraryRecord {
+  id: string
+  name: string
+  folderPath: string
+  enabled: boolean
+  packageCount: number
+  lastScannedAt: string | null
   createdAt: string
   updatedAt: string
 }
@@ -38,6 +72,7 @@ export interface StudioCondition {
   fieldId: string
   operator: PredicateConditionV1['operator']
   value: string
+  values?: string[]
 }
 
 export interface StudioWidgetQuery {
@@ -46,6 +81,10 @@ export interface StudioWidgetQuery {
   measureFieldId: string | null
   secondaryAggregation: AggregationOperationV1 | null
   secondaryMeasureFieldId: string | null
+  metricCalculation?: 'none' | 'difference' | 'ratioPercent'
+  secondaryRuleMode?: 'same' | 'custom'
+  secondaryMatch?: 'all' | 'any'
+  secondaryConditions?: StudioCondition[]
   groupByFieldId: string | null
   seriesFieldId: string | null
   tableFieldIds: string[]
@@ -67,8 +106,15 @@ export interface StudioWidgetAppearance {
   target: number
   xAxisTitle: string
   yAxisTitle: string
+  secondaryYAxisTitle?: string
   axisLabelRotation: 0 | 30 | 45 | 90
   showGrid: boolean
+  primaryLabel?: string
+  secondaryLabel?: string
+  showReferenceLine?: boolean
+  referenceLineValue?: number
+  referenceLineLabel?: string
+  referenceLineColor?: string
 }
 
 export interface StudioWidgetLayout {
@@ -102,12 +148,70 @@ export interface StudioPageRecord {
   updatedAt: string
 }
 
+export interface DashboardFilterBindingRecord {
+  datasetId: string
+  fieldId: string
+  fieldKey: string
+  fieldName: string
+  fieldType: InferredFieldType
+}
+
 export interface DashboardFilterRecord {
   id: string
   name: string
   fieldName: string
+  fieldType?: InferredFieldType
+  bindings?: DashboardFilterBindingRecord[]
   value: string
+  values?: string[]
+  selectionMode?: 'single' | 'multiple'
+  operator?: 'include' | 'exclude'
+  scope?: 'dashboard' | 'page'
+  pageId?: string | null
+  sourceWidgetId?: string | null
   enabled: boolean
+}
+
+export interface SavedCalculationRecord {
+  id: string
+  name: string
+  datasetId: string
+  aggregation: AggregationOperationV1
+  measureFieldId: string | null
+  secondaryAggregation: AggregationOperationV1 | null
+  secondaryMeasureFieldId: string | null
+  metricCalculation: 'none' | 'difference' | 'ratioPercent'
+  secondaryRuleMode: 'same' | 'custom'
+  secondaryMatch: 'all' | 'any'
+  secondaryConditions: StudioCondition[]
+  resultTransform: StudioWidgetQuery['resultTransform']
+  match: 'all' | 'any'
+  conditions: StudioCondition[]
+  valueFormat: StudioWidgetAppearance['valueFormat']
+  currencyCode: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface DashboardSourceFieldRequirement {
+  sourceFieldId: string
+  key: string
+  name: string
+  inferredType: InferredFieldType
+  sourceHeader?: string
+  sourceColumnIndex?: number
+  repair?: {
+    displayName: string | null
+    dataType: InferredFieldType | null
+  }
+}
+
+export interface DashboardSourceDatasetRequirement {
+  sourceDatasetId: string
+  datasetName: string
+  worksheetName: string
+  workbookFileName: string
+  fields: DashboardSourceFieldRequirement[]
 }
 
 export interface DashboardRecord {
@@ -120,6 +224,16 @@ export interface DashboardRecord {
   favorite: boolean
   pages: StudioPageRecord[]
   filters: DashboardFilterRecord[]
+  calculations?: SavedCalculationRecord[]
+  template?: {
+    id: string
+    version: string
+    author: string
+    source: 'builtIn' | 'package' | 'teamLibrary'
+    installedAt: string
+    detached: boolean
+    sourceRequirements?: DashboardSourceDatasetRequirement[]
+  }
   createdAt: string
   updatedAt: string
 }
@@ -150,6 +264,7 @@ export interface LibraryStore {
   folders: LibraryFolderRecord[]
   projects: ProjectRecord[]
   dashboards: DashboardRecord[]
+  teamLibraries: TeamLibraryRecord[]
   exportProfiles: ExportProfileRecord[]
   expandedFolderIds: string[]
   expandedProjectIds: string[]
@@ -169,7 +284,8 @@ export function createWidget(
   position: Pick<StudioWidgetLayout, 'x' | 'y'> = { x: 0, y: 0 },
 ): StudioWidgetRecord {
   const now = new Date().toISOString()
-  const isKpi = visualType === 'kpi'
+  const isKpi = visualType === 'kpi' || visualType === 'splitKpi'
+  const isSplitKpi = visualType === 'splitKpi'
   const isTable = visualType === 'table'
   return {
     id: createId('widget'),
@@ -180,8 +296,14 @@ export function createWidget(
       datasetId: null,
       aggregation: 'countRows',
       measureFieldId: null,
-      secondaryAggregation: visualType === 'combo' || visualType === 'scatter' ? 'countRows' : null,
+      secondaryAggregation: visualType === 'combo' || visualType === 'scatter' || isSplitKpi
+        ? 'countRows'
+        : null,
       secondaryMeasureFieldId: null,
+      metricCalculation: 'none',
+      secondaryRuleMode: 'same',
+      secondaryMatch: 'all',
+      secondaryConditions: [],
       groupByFieldId: null,
       seriesFieldId: null,
       tableFieldIds: [],
@@ -202,15 +324,22 @@ export function createWidget(
       target: 100,
       xAxisTitle: '',
       yAxisTitle: '',
+      secondaryYAxisTitle: '',
       axisLabelRotation: 0,
       showGrid: true,
+      primaryLabel: isSplitKpi ? 'Overall' : 'Value',
+      secondaryLabel: isSplitKpi ? 'Current period' : 'Secondary',
+      showReferenceLine: false,
+      referenceLineValue: 0,
+      referenceLineLabel: 'Target',
+      referenceLineColor: '#d92d20',
     },
     layout: {
       x: position.x,
       y: position.y,
-      w: isKpi ? 3 : isTable ? 12 : 6,
+      w: isSplitKpi ? 5 : isKpi ? 3 : isTable ? 12 : 6,
       h: isKpi ? 3 : isTable ? 8 : 7,
-      minW: isKpi ? 2 : 4,
+      minW: isSplitKpi ? 4 : isKpi ? 2 : 4,
       minH: isKpi ? 2 : 4,
     },
     locked: false,

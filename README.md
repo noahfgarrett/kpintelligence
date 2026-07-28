@@ -6,7 +6,7 @@ KPIntelligence turns spreadsheets in locally synced SharePoint or OneDrive folde
 
 The production OAC Weekly QA/QC dashboard is the first featured template and remains available alongside user-created dashboards.
 
-The general dashboard studio is labeled **beta** in v0.2.0. It already supports local spreadsheet profiling, click-to-build calculations, global filters, 18 visual types, drag-and-resize pages, row drill-through, and configurable exports. Guarded joins, reusable calculated fields, richer prior-period comparisons, and native editable PowerPoint text and table objects remain roadmap work.
+Version 0.3.0 turns the dashboard studio into an end-to-end authoring workflow. It supports guided spreadsheet intake and repair, quick chart suggestions, direct field roles, reusable calculation recipes, multi-select page or dashboard slicers, interactive cross-filtering, 18 visual types, drag-and-resize pages, row drill-through, portable dashboard packages, Team Libraries, and configurable exports. Guarded joins, live linked calculated fields, richer period comparisons, and native editable PowerPoint text and table objects remain roadmap work.
 
 ## Product Model
 
@@ -36,7 +36,8 @@ Every custom visual keeps its source and rule sentence visible, reports matched-
 - Spreadsheet rows are read into memory and are not copied into an application database.
 - Dashboard definitions persist separately from source data.
 - Incomplete syncs never replace the last valid source snapshot.
-- Future portable workspace packages must exclude absolute paths and raw source rows.
+- Portable `.kpidashboard` packages exclude spreadsheet rows, credentials, and absolute source paths.
+- Team Libraries scan user-approved local sync folders and install dashboards as independent local copies.
 
 ## Development
 
@@ -50,7 +51,7 @@ npm test
 npm run tauri:dev
 ```
 
-The Vite preview runs on `http://127.0.0.1:5274`. Browser mode supports layout and manual-file testing. Persistent folder monitoring, native saves, and signed updates require the desktop app.
+The Vite preview runs on `http://127.0.0.1:5274`. Browser mode supports layout and manual-file testing. Persistent folder monitoring, native saves, Team Library folders, and signed updates require the desktop app.
 
 ## Build
 
@@ -76,4 +77,4 @@ Required source-repository secrets:
 - `RELEASE_REPO_TOKEN`: token with Contents write access to the release repository.
 - `TAURI_SIGNING_PRIVATE_KEY`: updater private key.
 
-The Tauri bundle identifier remains stable during the rename so current installations receive KPIntelligence as an update.
+The Tauri bundle identifier remains stable during the rename so current installations receive KPIntelligence as an update. Releases are assembled as drafts, verified across macOS and Windows, checksummed, and published only after the complete updater feed is ready.

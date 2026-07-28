@@ -8,7 +8,11 @@ import type {
   StudioWidgetRecord,
 } from '../library/model'
 import WidgetView from '../builder/WidgetView'
-import { dashboardFilterConditions, runStudioQuery } from '../builder/queryAdapter'
+import {
+  dashboardFilterConditions,
+  dashboardFiltersForWidget,
+  runStudioQuery,
+} from '../builder/queryAdapter'
 import { exportPageSize } from './customDashboard'
 
 interface ExportSegment {
@@ -74,6 +78,7 @@ function datasetFor(widget: StudioWidgetRecord, catalog: SpreadsheetCatalogProfi
 
 function tableRowCount(
   widget: StudioWidgetRecord,
+  pageId: string,
   dashboard: DashboardRecord,
   catalog: SpreadsheetCatalogProfile | null,
 ): number {
@@ -83,7 +88,11 @@ function tableRowCount(
     return runStudioQuery(
       widget.query,
       dataset,
-      dashboardFilterConditions(dashboard.filters, dataset),
+      dashboardFilterConditions(
+        dashboardFiltersForWidget(dashboard.filters, widget.id),
+        dataset,
+        pageId,
+      ),
     ).result.diagnostics.matchedRows
   } catch {
     return 0
@@ -116,7 +125,7 @@ export function buildExportSegments(
     }))
     const rowsPerPage = profile.tableOverflow === 'shrink' ? 55 : 28
     const tableSegments = tables.flatMap((widget) => {
-      const rowCount = tableRowCount(widget, dashboard, catalog)
+      const rowCount = tableRowCount(widget, page.id, dashboard, catalog)
       const firstPageRows = Math.max(
         3,
         Math.floor(widget.layout.h * (profile.tableOverflow === 'shrink' ? 3 : 2) - 4),
@@ -258,7 +267,8 @@ export default function DashboardExportStage({
                     dataset={datasetFor(widget, catalog)}
                     selected={false}
                     editable={false}
-                    dashboardFilters={dashboard.filters}
+                    dashboardFilters={dashboardFiltersForWidget(dashboard.filters, widget.id)}
+                    pageId={segment.page.id}
                     showQueryContext={false}
                     tableRowStart={segment.tableSlices?.[widget.id]?.start ?? 0}
                     tableRowLimit={segment.tableSlices?.[widget.id]?.limit ?? 50}

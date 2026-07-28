@@ -9,10 +9,12 @@ import {
   type ExportProfileRecord,
   type LibraryStore,
   type ProjectRecord,
+  type TeamLibraryRecord,
 } from './model'
 
 const LIBRARY_STORAGE_KEY = 'studio-library'
 const LIBRARY_BACKUP_KEY = 'studio-library-backup'
+const LIBRARY_RECOVERY_KEY = 'studio-library-recovery'
 
 export class LibraryCompatibilityError extends Error {
   constructor(message: string) {
@@ -77,6 +79,7 @@ export function createEmptyLibrary(): LibraryStore {
     sourceFileCount: 0,
     sourceDatasetCount: 0,
     sourceRefreshedAt: null,
+    sourceRepairs: { fieldRepairs: [], reviewedDatasetIds: [] },
     createdAt: now,
     updatedAt: now,
   }
@@ -87,6 +90,7 @@ export function createEmptyLibrary(): LibraryStore {
     folders: [],
     projects: [project],
     dashboards: [dashboard],
+    teamLibraries: [],
     exportProfiles: [defaultExportProfile(project.id, dashboard.id)],
     expandedFolderIds: [],
     expandedProjectIds: [project.id],
@@ -112,6 +116,7 @@ function migrateWorkspaceStore(workspaces: WorkspaceStoreData): LibraryStore {
       sourceFileCount: 0,
       sourceDatasetCount: 0,
       sourceRefreshedAt: null,
+      sourceRepairs: { fieldRepairs: [], reviewedDatasetIds: [] },
       reportFilters: mergeFilters(workspace.filters ?? {}),
       createdAt: workspace.createdAt || now,
       updatedAt: now,
@@ -133,6 +138,7 @@ function migrateWorkspaceStore(workspaces: WorkspaceStoreData): LibraryStore {
     folders: [],
     projects,
     dashboards,
+    teamLibraries: [],
     exportProfiles,
     expandedFolderIds: [],
     expandedProjectIds: projects.map((project) => project.id),
@@ -146,7 +152,7 @@ function migrateWorkspaceStore(workspaces: WorkspaceStoreData): LibraryStore {
 type UnknownRecord = Record<string, unknown>
 
 const VISUAL_TYPES = new Set([
-  'kpi', 'table', 'bar', 'column', 'stackedBar', 'line', 'area', 'combo',
+  'kpi', 'splitKpi', 'table', 'bar', 'column', 'stackedBar', 'line', 'area', 'combo',
   'donut', 'pie', 'scatter', 'radar', 'gauge', 'funnel', 'heatmap',
   'treemap', 'progress', 'text',
 ])
@@ -155,6 +161,7 @@ const AGGREGATIONS = new Set([
   'first', 'last',
 ])
 const RESULT_TRANSFORMS = new Set(['none', 'percentOfTotal', 'runningTotal'])
+const FIELD_TYPES = new Set(['text', 'number', 'boolean', 'date', 'datetime', 'workWeek'])
 const SORTS = new Set([
   'categoryAscending', 'categoryDescending', 'valueAscending', 'valueDescending',
 ])
@@ -207,7 +214,63 @@ function validCondition(value: unknown): boolean {
     && isString(condition.id)
     && isString(condition.fieldId)
     && OPERATORS.has(String(condition.operator))
-    && isString(condition.value))
+    && isString(condition.value)
+    && (condition.values === undefined || isStringArray(condition.values)))
+}
+
+function validSourceRepairs(value: unknown): boolean {
+  if (value === undefined) return true
+  const repairs = asRecord(value)
+  return Boolean(repairs
+    && Array.isArray(repairs.fieldRepairs)
+    && repairs.fieldRepairs.every((candidate) => {
+      const repair = asRecord(candidate)
+      return Boolean(repair
+        && isString(repair.id)
+        && isString(repair.datasetId)
+        && isString(repair.fieldId)
+        && (repair.workbookFileName === undefined || isString(repair.workbookFileName))
+        && (repair.datasetName === undefined || isString(repair.datasetName))
+        && (repair.worksheetName === undefined || isString(repair.worksheetName))
+        && (repair.fieldKey === undefined || isString(repair.fieldKey))
+        && (repair.sourceHeader === undefined || isString(repair.sourceHeader))
+        && (repair.sourceColumnIndex === undefined
+          || (isFiniteNumber(repair.sourceColumnIndex)
+            && Number.isInteger(repair.sourceColumnIndex)
+            && repair.sourceColumnIndex >= 0))
+        && isNullableString(repair.displayName)
+        && (repair.dataType === null
+          || ['text', 'number', 'boolean', 'date', 'datetime', 'workWeek'].includes(String(repair.dataType)))
+        && isString(repair.updatedAt))
+    })
+    && isStringArray(repairs.reviewedDatasetIds))
+}
+
+function validSavedCalculation(value: unknown): boolean {
+  const calculation = asRecord(value)
+  return Boolean(calculation
+    && isString(calculation.id)
+    && isString(calculation.name)
+    && isString(calculation.datasetId)
+    && AGGREGATIONS.has(String(calculation.aggregation))
+    && isNullableString(calculation.measureFieldId)
+    && (calculation.secondaryAggregation === null
+      || AGGREGATIONS.has(String(calculation.secondaryAggregation)))
+    && isNullableString(calculation.secondaryMeasureFieldId)
+    && ['none', 'difference', 'ratioPercent'].includes(String(calculation.metricCalculation))
+    && ['same', 'custom'].includes(String(calculation.secondaryRuleMode))
+    && (calculation.secondaryMatch === 'all' || calculation.secondaryMatch === 'any')
+    && Array.isArray(calculation.secondaryConditions)
+    && calculation.secondaryConditions.every(validCondition)
+    && (calculation.resultTransform === undefined
+      || RESULT_TRANSFORMS.has(String(calculation.resultTransform)))
+    && (calculation.match === 'all' || calculation.match === 'any')
+    && Array.isArray(calculation.conditions)
+    && calculation.conditions.every(validCondition)
+    && ['number', 'percent', 'currency'].includes(String(calculation.valueFormat))
+    && isString(calculation.currencyCode)
+    && isString(calculation.createdAt)
+    && isString(calculation.updatedAt))
 }
 
 function validWidget(value: unknown): boolean {
@@ -227,6 +290,15 @@ function validWidget(value: unknown): boolean {
     && isNullableString(query.measureFieldId)
     && (query.secondaryAggregation === null || AGGREGATIONS.has(String(query.secondaryAggregation)))
     && isNullableString(query.secondaryMeasureFieldId)
+    && (query.metricCalculation === undefined
+      || ['none', 'difference', 'ratioPercent'].includes(String(query.metricCalculation)))
+    && (query.secondaryRuleMode === undefined
+      || ['same', 'custom'].includes(String(query.secondaryRuleMode)))
+    && (query.secondaryMatch === undefined
+      || query.secondaryMatch === 'all'
+      || query.secondaryMatch === 'any')
+    && (query.secondaryConditions === undefined
+      || (Array.isArray(query.secondaryConditions) && query.secondaryConditions.every(validCondition)))
     && isNullableString(query.groupByFieldId)
     && isNullableString(query.seriesFieldId)
     && isStringArray(query.tableFieldIds)
@@ -248,8 +320,15 @@ function validWidget(value: unknown): boolean {
     && isFiniteNumber(appearance.target)
     && isString(appearance.xAxisTitle)
     && isString(appearance.yAxisTitle)
+    && (appearance.secondaryYAxisTitle === undefined || isString(appearance.secondaryYAxisTitle))
     && [0, 30, 45, 90].includes(Number(appearance.axisLabelRotation))
     && typeof appearance.showGrid === 'boolean'
+    && (appearance.primaryLabel === undefined || isString(appearance.primaryLabel))
+    && (appearance.secondaryLabel === undefined || isString(appearance.secondaryLabel))
+    && (appearance.showReferenceLine === undefined || typeof appearance.showReferenceLine === 'boolean')
+    && (appearance.referenceLineValue === undefined || isFiniteNumber(appearance.referenceLineValue))
+    && (appearance.referenceLineLabel === undefined || isString(appearance.referenceLineLabel))
+    && (appearance.referenceLineColor === undefined || isString(appearance.referenceLineColor))
     && layout
     && ['x', 'y', 'w', 'h', 'minW', 'minH'].every((key) => isFiniteNumber(layout[key])))
 }
@@ -265,12 +344,139 @@ function validPage(value: unknown): boolean {
 
 function validDashboardFilter(value: unknown): boolean {
   const filter = asRecord(value)
+  const validFieldType = (candidate: unknown) => FIELD_TYPES.has(String(candidate))
+  const validBinding = (candidate: unknown) => {
+    const binding = asRecord(candidate)
+    return Boolean(binding
+      && isString(binding.datasetId)
+      && isString(binding.fieldId)
+      && isString(binding.fieldKey)
+      && isString(binding.fieldName)
+      && validFieldType(binding.fieldType))
+  }
   return Boolean(filter
     && isString(filter.id)
     && isString(filter.name)
     && isString(filter.fieldName)
+    && (filter.fieldType === undefined || validFieldType(filter.fieldType))
+    && (filter.bindings === undefined
+      || (Array.isArray(filter.bindings)
+        && filter.bindings.every(validBinding)
+        && new Set(filter.bindings.map((binding) =>
+          String(asRecord(binding)?.datasetId))).size === filter.bindings.length))
     && isString(filter.value)
+    && (filter.values === undefined || isStringArray(filter.values))
+    && (filter.selectionMode === undefined
+      || filter.selectionMode === 'single'
+      || filter.selectionMode === 'multiple')
+    && (filter.operator === undefined
+      || filter.operator === 'include'
+      || filter.operator === 'exclude')
+    && (filter.scope === undefined
+      || filter.scope === 'dashboard'
+      || filter.scope === 'page')
+    && (filter.pageId === undefined || isNullableString(filter.pageId))
+    && (filter.sourceWidgetId === undefined || isNullableString(filter.sourceWidgetId))
     && typeof filter.enabled === 'boolean')
+}
+
+function validSourceRequirement(value: unknown): boolean {
+  const requirement = asRecord(value)
+  if (!requirement
+    || !isString(requirement.sourceDatasetId)
+    || !isString(requirement.datasetName)
+    || !isString(requirement.worksheetName)
+    || !isString(requirement.workbookFileName)
+    || !Array.isArray(requirement.fields)) return false
+  return requirement.fields.every((candidate) => {
+    const field = asRecord(candidate)
+    const repair = field?.repair === undefined ? undefined : asRecord(field.repair)
+    return Boolean(field
+      && isString(field.sourceFieldId)
+      && isString(field.key)
+      && isString(field.name)
+      && FIELD_TYPES.has(String(field.inferredType))
+      && (field.sourceHeader === undefined || isString(field.sourceHeader))
+      && (field.sourceColumnIndex === undefined
+        || (isFiniteNumber(field.sourceColumnIndex) && Number(field.sourceColumnIndex) >= 0))
+      && (repair === undefined || (repair && (
+        isNullableString(repair.displayName)
+        && (repair.dataType === null || FIELD_TYPES.has(String(repair.dataType)))
+      ))))
+  })
+}
+
+function validDashboardTemplate(value: unknown): boolean {
+  if (value === undefined) return true
+  const template = asRecord(value)
+  return Boolean(template
+    && isString(template.id)
+    && template.id.length > 0
+    && isString(template.version)
+    && isString(template.author)
+    && ['builtIn', 'package', 'teamLibrary'].includes(String(template.source))
+    && isString(template.installedAt)
+    && typeof template.detached === 'boolean'
+    && (template.sourceRequirements === undefined
+      || (Array.isArray(template.sourceRequirements)
+        && template.sourceRequirements.every(validSourceRequirement))))
+}
+
+export function isDashboardRecord(value: unknown): value is DashboardRecord {
+  const dashboard = asRecord(value)
+  const structurallyValid = Boolean(dashboard
+    && hasIdentity(dashboard)
+    && isString(dashboard.projectId)
+    && isString(dashboard.description)
+    && ['oacWeekly', 'custom'].includes(String(dashboard.kind))
+    && typeof dashboard.featured === 'boolean'
+    && typeof dashboard.favorite === 'boolean'
+    && Array.isArray(dashboard.pages)
+    && dashboard.pages.every(validPage)
+    && Array.isArray(dashboard.filters)
+    && dashboard.filters.every(validDashboardFilter)
+    && (dashboard.calculations === undefined
+      || (Array.isArray(dashboard.calculations)
+        && dashboard.calculations.every(validSavedCalculation)))
+    && validDashboardTemplate(dashboard.template))
+  if (!structurallyValid || !dashboard) return false
+  const pages = dashboard.pages as UnknownRecord[]
+  const filters = dashboard.filters as UnknownRecord[]
+  const calculations = (dashboard.calculations ?? []) as UnknownRecord[]
+  const pageIdList = pages.map((page) => String(page.id))
+  const pageIds = new Set(pageIdList)
+  const widgetIds = pages.flatMap((page) =>
+    (page.widgets as UnknownRecord[]).map((widget) => String(widget.id)))
+  const unique = (values: string[]) => new Set(values).size === values.length
+  return unique(pageIdList)
+    && unique(widgetIds)
+    && unique(filters.map((filter) => String(filter.id)))
+    && unique(calculations.map((calculation) => String(calculation.id)))
+    && filters.every((filter) =>
+      (filter.scope !== 'page'
+        || (typeof filter.pageId === 'string' && pageIds.has(filter.pageId)))
+      && (filter.sourceWidgetId === undefined
+        || filter.sourceWidgetId === null
+        || widgetIds.includes(String(filter.sourceWidgetId))))
+}
+
+export function isExportProfileRecord(value: unknown): value is ExportProfileRecord {
+  const profile = asRecord(value)
+  return Boolean(profile
+    && hasIdentity(profile)
+    && isString(profile.projectId)
+    && isNullableString(profile.dashboardId)
+    && ['pdf', 'pptx', 'png'].includes(String(profile.format))
+    && ['widescreen', 'standard', 'letter', 'a4'].includes(String(profile.pageSize))
+    && ['landscape', 'portrait'].includes(String(profile.orientation))
+    && isFiniteNumber(profile.margin)
+    && typeof profile.includeTitle === 'boolean'
+    && typeof profile.includeGeneratedAt === 'boolean'
+    && typeof profile.includePageNumbers === 'boolean'
+    && ['paginate', 'shrink'].includes(String(profile.tableOverflow))
+    && [1, 2, 3, 4].includes(Number(profile.scale))
+    && isString(profile.headerText)
+    && isString(profile.footerText))
 }
 
 function validReportFilters(value: unknown): boolean {
@@ -285,16 +491,18 @@ function validReportFilters(value: unknown): boolean {
     && typeof filters.oac === 'boolean')
 }
 
-function validLibrary(value: unknown): value is LibraryStore {
+function validLibrary(value: unknown): boolean {
   const candidate = asRecord(value)
+  const storedSchemaVersion = Number(candidate?.schemaVersion)
   if (
     !candidate
-    || candidate.schemaVersion !== LIBRARY_SCHEMA_VERSION
+    || ![1, 2, 3, LIBRARY_SCHEMA_VERSION].includes(storedSchemaVersion)
     || !Number.isInteger(candidate.revision)
     || Number(candidate.revision) < 1
     || !Array.isArray(candidate.folders)
     || !Array.isArray(candidate.projects)
     || !Array.isArray(candidate.dashboards)
+    || (storedSchemaVersion >= 2 && !Array.isArray(candidate.teamLibraries))
     || !Array.isArray(candidate.exportProfiles)
     || !isStringArray(candidate.expandedFolderIds)
     || !isStringArray(candidate.expandedProjectIds)
@@ -304,6 +512,9 @@ function validLibrary(value: unknown): value is LibraryStore {
   const folders = candidate.folders.map(asRecord)
   const projects = candidate.projects.map(asRecord)
   const dashboards = candidate.dashboards.map(asRecord)
+  const teamLibraries = storedSchemaVersion === 1
+    ? []
+    : (candidate.teamLibraries as unknown[]).map(asRecord)
   const exportProfiles = candidate.exportProfiles.map(asRecord)
   if (
     folders.some((folder) => !folder
@@ -318,44 +529,29 @@ function validLibrary(value: unknown): value is LibraryStore {
       || !isFiniteNumber(project.sourceFileCount)
       || !isFiniteNumber(project.sourceDatasetCount)
       || !isNullableString(project.sourceRefreshedAt)
+      || !validSourceRepairs(project.sourceRepairs)
       || !validReportFilters(project.reportFilters))
-    || dashboards.some((dashboard) => !dashboard
-      || !hasIdentity(dashboard)
-      || !isString(dashboard.projectId)
-      || !isString(dashboard.description)
-      || !['oacWeekly', 'custom'].includes(String(dashboard.kind))
-      || typeof dashboard.featured !== 'boolean'
-      || typeof dashboard.favorite !== 'boolean'
-      || !Array.isArray(dashboard.pages)
-      || !dashboard.pages.every(validPage)
-      || !Array.isArray(dashboard.filters)
-      || !dashboard.filters.every(validDashboardFilter))
-    || exportProfiles.some((profile) => !profile
-      || !hasIdentity(profile)
-      || !isString(profile.projectId)
-      || !isNullableString(profile.dashboardId)
-      || !['pdf', 'pptx', 'png'].includes(String(profile.format))
-      || !['widescreen', 'standard', 'letter', 'a4'].includes(String(profile.pageSize))
-      || !['landscape', 'portrait'].includes(String(profile.orientation))
-      || !isFiniteNumber(profile.margin)
-      || typeof profile.includeTitle !== 'boolean'
-      || typeof profile.includeGeneratedAt !== 'boolean'
-      || typeof profile.includePageNumbers !== 'boolean'
-      || !['paginate', 'shrink'].includes(String(profile.tableOverflow))
-      || ![1, 2, 3, 4].includes(Number(profile.scale))
-      || !isString(profile.headerText)
-      || !isString(profile.footerText))
+    || candidate.dashboards.some((dashboard) => !isDashboardRecord(dashboard))
+    || teamLibraries.some((library) => !library
+      || !hasIdentity(library)
+      || !isString(library.folderPath)
+      || library.folderPath.length === 0
+      || typeof library.enabled !== 'boolean'
+      || !isFiniteNumber(library.packageCount)
+      || !isNullableString(library.lastScannedAt))
+    || candidate.exportProfiles.some((profile) => !isExportProfileRecord(profile))
   ) return false
 
   const uniqueIds = (records: Array<UnknownRecord | null>) => {
     const ids = records.map((record) => String(record?.id))
     return new Set(ids).size === ids.length
   }
-  if (![folders, projects, dashboards, exportProfiles].every(uniqueIds)) return false
+  if (![folders, projects, dashboards, teamLibraries, exportProfiles].every(uniqueIds)) return false
 
   const folderIds = new Set(folders.map((folder) => String(folder?.id)))
   const projectIds = new Set(projects.map((project) => String(project?.id)))
   const dashboardIds = new Set(dashboards.map((dashboard) => String(dashboard?.id)))
+  const teamLibraryIds = new Set(teamLibraries.map((library) => String(library?.id)))
   const dashboardProjectIds = new Map(dashboards.map((dashboard) => [
     String(dashboard?.id),
     String(dashboard?.projectId),
@@ -395,13 +591,44 @@ function validLibrary(value: unknown): value is LibraryStore {
   if (selection.kind === 'folder') return folderIds.has(selection.id)
   if (selection.kind === 'project') return projectIds.has(selection.id)
   if (selection.kind === 'dashboard') return dashboardIds.has(selection.id)
+  if (selection.kind === 'teamLibrary') return teamLibraryIds.has(selection.id)
   return false
+}
+
+function normalizeLibrary(value: unknown): LibraryStore | null {
+  if (!validLibrary(value)) return null
+  const candidate = value as LibraryStore & { schemaVersion: number; teamLibraries?: TeamLibraryRecord[] }
+  const dashboards = candidate.dashboards.map((dashboard) => ({
+    ...dashboard,
+    calculations: dashboard.calculations?.map((calculation) => ({
+      ...calculation,
+      resultTransform: calculation.resultTransform ?? 'none',
+    })),
+  }))
+  const calculationsNeedMigration = candidate.dashboards.some((dashboard) =>
+    dashboard.calculations?.some((calculation) => calculation.resultTransform === undefined))
+  if (candidate.schemaVersion === LIBRARY_SCHEMA_VERSION && !calculationsNeedMigration) {
+    return candidate
+  }
+  return {
+    ...candidate,
+    schemaVersion: LIBRARY_SCHEMA_VERSION,
+    teamLibraries: candidate.teamLibraries ?? [],
+    dashboards,
+  }
 }
 
 export async function loadLibrary(platform: PlatformBridge): Promise<LibraryStore> {
   const current = await platform.loadState<unknown>(LIBRARY_STORAGE_KEY)
   if (current !== null) {
-    if (validLibrary(current)) return current
+    const normalized = normalizeLibrary(current)
+    if (normalized) {
+      if (normalized !== current) {
+        await platform.saveState(LIBRARY_BACKUP_KEY, current)
+        await platform.saveState(LIBRARY_STORAGE_KEY, normalized)
+      }
+      return normalized
+    }
     const schemaVersion = typeof current === 'object' && current
       ? Number((current as { schemaVersion?: unknown }).schemaVersion)
       : Number.NaN
@@ -422,14 +649,33 @@ export async function loadLibrary(platform: PlatformBridge): Promise<LibraryStor
 }
 
 export async function saveLibrary(platform: PlatformBridge, store: LibraryStore): Promise<void> {
+  if (store.schemaVersion !== LIBRARY_SCHEMA_VERSION || !validLibrary(store)) {
+    throw new LibraryCompatibilityError(
+      'KPIntelligence refused to save an invalid dashboard library. The previous local copy was left untouched.',
+    )
+  }
   const previous = await platform.loadState<unknown>(LIBRARY_STORAGE_KEY)
+  const normalizedPrevious = normalizeLibrary(previous)
   if (
-    validLibrary(previous)
-    && previous.revision !== store.revision
+    normalizedPrevious
+    && normalizedPrevious.revision !== store.revision
   ) {
     await platform.saveState(LIBRARY_BACKUP_KEY, previous)
   }
   await platform.saveState(LIBRARY_STORAGE_KEY, store)
+}
+
+export async function loadLibraryBackup(platform: PlatformBridge): Promise<LibraryStore | null> {
+  return normalizeLibrary(await platform.loadState<unknown>(LIBRARY_BACKUP_KEY))
+}
+
+export async function restoreLibraryBackup(platform: PlatformBridge): Promise<LibraryStore> {
+  const backup = await loadLibraryBackup(platform)
+  if (!backup) throw new Error('No valid dashboard library backup is available.')
+  const current = await platform.loadState<unknown>(LIBRARY_STORAGE_KEY)
+  if (current !== null) await platform.saveState(LIBRARY_RECOVERY_KEY, current)
+  await platform.saveState(LIBRARY_STORAGE_KEY, backup)
+  return backup
 }
 
 export async function loadLegacyFilters(platform: PlatformBridge): Promise<Record<string, ReportFilters>> {

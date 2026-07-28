@@ -31,6 +31,7 @@ import { isUsableSourceFile, loadWorkspaceSource } from '@/workspaces/source'
 import type { WorkspaceSourceSnapshot } from '@/workspaces/types'
 import DashboardStudio from '../builder/DashboardStudio'
 import {
+  applySourceRepairs,
   isSupportedSpreadsheet,
   isZipArchive,
   profileSpreadsheetInputs,
@@ -45,13 +46,48 @@ import {
   type LibrarySelection,
   type LibraryStore,
   type ProjectRecord,
+  type ProjectSourceRepairs,
+  type TeamLibraryRecord,
 } from '../library/model'
-import { createEmptyLibrary, loadLibrary, saveLibrary } from '../library/repository'
+import {
+  createEmptyLibrary,
+  loadLibrary,
+  loadLibraryBackup,
+  restoreLibraryBackup,
+  saveLibrary,
+} from '../library/repository'
+import {
+  compareSemver,
+  createDashboardPackage,
+  installDashboardPackage,
+  PackageInstallModal,
+  readDashboardPackage,
+  scanTeamLibrary,
+  ShareDashboardModal,
+  sourceRepairProposals,
+  TeamLibraryView,
+  type DashboardPackageDocument,
+  type DashboardPackageFile,
+  type PackagePublishOptions,
+  type TeamLibraryCatalog,
+} from '../packages'
 
 type SourceState = {
   status: 'idle' | 'loading' | 'ready' | 'warning' | 'error'
   message: string
   catalog: SpreadsheetCatalogProfile | null
+  rawCatalog?: SpreadsheetCatalogProfile | null
+}
+
+type TeamLibraryState = {
+  status: 'idle' | 'loading' | 'ready' | 'warning' | 'error'
+  message: string
+  catalog: TeamLibraryCatalog | null
+}
+
+type PendingPackage = {
+  document: DashboardPackageDocument
+  source: 'package' | 'teamLibrary'
 }
 
 type CreateRequest =
@@ -82,6 +118,25 @@ async function mapWithConcurrency<T, R>(
 
 function now(): string {
   return new Date().toISOString()
+}
+
+function packageAwareSourceRepairs(
+  store: LibraryStore,
+  projectId: string,
+  catalog: SpreadsheetCatalogProfile,
+): ProjectSourceRepairs {
+  const project = store.projects.find((candidate) => candidate.id === projectId)
+  const configured = project?.sourceRepairs ?? {
+    fieldRepairs: [],
+    reviewedDatasetIds: [],
+  }
+  const requirements = store.dashboards
+    .filter((dashboard) => dashboard.projectId === projectId)
+    .flatMap((dashboard) => dashboard.template?.sourceRequirements ?? [])
+  const proposals = sourceRepairProposals(requirements, catalog, configured)
+  return proposals.length > 0
+    ? { ...configured, fieldRepairs: [...configured.fieldRepairs, ...proposals] }
+    : configured
 }
 
 function folderName(path: string | null): string {
@@ -133,6 +188,7 @@ function dashboardBindingsResolve(
       widget.query.seriesFieldId,
       ...widget.query.tableFieldIds,
       ...widget.query.conditions.map((condition) => condition.fieldId),
+      ...(widget.query.secondaryConditions ?? []).map((condition) => condition.fieldId),
     ].filter((id): id is string => Boolean(id)).every((id) => fieldIds.has(id))
   }))
 }
@@ -536,6 +592,7 @@ export default function KPIntelligenceShell() {
   storeRef.current = store
   const [loading, setLoading] = useState(true)
   const [libraryLoadError, setLibraryLoadError] = useState<string | null>(null)
+  const [libraryBackupAvailable, setLibraryBackupAvailable] = useState(false)
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [librarySaveState, setLibrarySaveState] = useState<{
     status: 'saved' | 'saving' | 'error'
@@ -556,10 +613,16 @@ export default function KPIntelligenceShell() {
   const [updateCheckError, setUpdateCheckError] = useState<string | null>(null)
   const [lastUpdateCheck, setLastUpdateCheck] = useState<Date | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
+  const [pendingPackage, setPendingPackage] = useState<PendingPackage | null>(null)
+  const [teamLibraryStates, setTeamLibraryStates] = useState<Record<string, TeamLibraryState>>({})
   const [libraryNotice, setLibraryNotice] = useState<string | null>(null)
   const refreshTimers = useRef<Record<string, number>>({})
+  const teamLibraryRefreshTimers = useRef<Record<string, number>>({})
   const sourceRefreshGeneration = useRef<Record<string, number>>({})
   const oacRefreshGeneration = useRef<Record<string, number>>({})
+  const teamLibraryRefreshGeneration = useRef<Record<string, number>>({})
+  const packageInputRef = useRef<HTMLInputElement>(null)
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const latestSaveRevisionRef = useRef(store.revision)
   const noticeTimerRef = useRef<number | null>(null)
@@ -603,14 +666,18 @@ export default function KPIntelligenceShell() {
     let active = true
     setLoading(true)
     setLibraryLoadError(null)
+    setLibraryBackupAvailable(false)
     void loadLibrary(platform).then((value) => {
       if (!active) return
       storeRef.current = value
       latestSaveRevisionRef.current = value.revision
       setStore(value)
       setLoading(false)
-    }).catch((error) => {
+    }).catch(async (error) => {
       if (active) {
+        const backup = await loadLibraryBackup(platform).catch(() => null)
+        if (!active) return
+        setLibraryBackupAvailable(Boolean(backup))
         setLibraryLoadError(
           error instanceof Error ? error.message : 'The local dashboard library could not be opened.',
         )
@@ -619,6 +686,20 @@ export default function KPIntelligenceShell() {
     })
     return () => { active = false }
   }, [loadAttempt])
+
+  async function restoreLastLibraryBackup(): Promise<void> {
+    setLoading(true)
+    try {
+      await restoreLibraryBackup(platform)
+      setLibraryLoadError(null)
+      setLoadAttempt((attempt) => attempt + 1)
+    } catch (error) {
+      setLibraryLoadError(
+        error instanceof Error ? error.message : 'The last dashboard library backup could not be restored.',
+      )
+      setLoading(false)
+    }
+  }
 
   const commitStore = useCallback((updater: (current: LibraryStore) => LibraryStore): void => {
     const current = storeRef.current
@@ -644,6 +725,9 @@ export default function KPIntelligenceShell() {
   }, [store.selection, store.projects, selectedDashboard])
   const selectedFolder = store.selection.kind === 'folder'
     ? store.folders.find((folder) => folder.id === store.selection.id) ?? null
+    : null
+  const selectedTeamLibrary = store.selection.kind === 'teamLibrary'
+    ? store.teamLibraries.find((library) => library.id === store.selection.id) ?? null
     : null
   const selectedSource = selectedProject
     ? sourceStates[selectedProject.id] ?? {
@@ -724,6 +808,7 @@ export default function KPIntelligenceShell() {
         status: 'loading',
         message: 'Scanning spreadsheets and checking column types…',
         catalog: current[project.id]?.catalog ?? null,
+        rawCatalog: current[project.id]?.rawCatalog ?? null,
       },
     }))
     try {
@@ -753,8 +838,10 @@ export default function KPIntelligenceShell() {
         bytes: await platform.readFile(file.path),
       }))
       if (!isCurrent()) return
-      const catalog = await profileSpreadsheetInputs(inputs)
+      const rawCatalog = await profileSpreadsheetInputs(inputs)
       if (!isCurrent()) return
+      const sourceRepairs = packageAwareSourceRepairs(storeRef.current, project.id, rawCatalog)
+      const catalog = applySourceRepairs(rawCatalog, sourceRepairs)
       const previousCatalog = previousCatalogOverride === undefined
         ? sourceStatesRef.current[project.id]?.catalog ?? null
         : previousCatalogOverride
@@ -765,6 +852,7 @@ export default function KPIntelligenceShell() {
           status: catalog.warnings.length > 0 ? 'warning' : 'ready',
           message: `${catalog.datasets.length} worksheet${catalog.datasets.length === 1 ? '' : 's'} ready from ${catalog.workbooks.length} file${catalog.workbooks.length === 1 ? '' : 's'}.`,
           catalog,
+          rawCatalog,
         },
       }))
       commitStore((current) => ({
@@ -775,6 +863,7 @@ export default function KPIntelligenceShell() {
               sourceFileCount: catalog.workbooks.length,
               sourceDatasetCount: catalog.datasets.length,
               sourceRefreshedAt: refreshedAt,
+              sourceRepairs,
               updatedAt: refreshedAt,
             }
           : candidate),
@@ -790,10 +879,60 @@ export default function KPIntelligenceShell() {
           status: current[project.id]?.catalog ? 'warning' : 'error',
           message: error instanceof Error ? error.message : 'The project folder could not be read.',
           catalog: current[project.id]?.catalog ?? null,
+          rawCatalog: current[project.id]?.rawCatalog ?? null,
         },
       }))
     }
   }, [commitStore, refreshOacProject])
+
+  const refreshTeamLibrary = useCallback(async (
+    library: TeamLibraryRecord,
+  ): Promise<void> => {
+    const generation = (teamLibraryRefreshGeneration.current[library.id] ?? 0) + 1
+    teamLibraryRefreshGeneration.current[library.id] = generation
+    const isCurrent = () => teamLibraryRefreshGeneration.current[library.id] === generation
+    setTeamLibraryStates((current) => ({
+      ...current,
+      [library.id]: {
+        status: 'loading',
+        message: 'Reading shared dashboard packages…',
+        catalog: current[library.id]?.catalog ?? null,
+      },
+    }))
+    try {
+      const catalog = await scanTeamLibrary(platform, library)
+      if (!isCurrent()) return
+      const status = catalog.warnings.length > 0 ? 'warning' as const : 'ready' as const
+      const message = catalog.packages.length > 0
+        ? `${catalog.packages.length} dashboard package${catalog.packages.length === 1 ? '' : 's'} ready.`
+        : 'This shared folder does not contain any .kpidashboard packages yet.'
+      setTeamLibraryStates((current) => ({
+        ...current,
+        [library.id]: { status, message, catalog },
+      }))
+      commitStore((current) => ({
+        ...current,
+        teamLibraries: current.teamLibraries.map((candidate) => candidate.id === library.id
+          ? {
+              ...candidate,
+              packageCount: catalog.packages.length,
+              lastScannedAt: catalog.scannedAt,
+              updatedAt: catalog.scannedAt,
+            }
+          : candidate),
+      }))
+    } catch (error) {
+      if (!isCurrent()) return
+      setTeamLibraryStates((current) => ({
+        ...current,
+        [library.id]: {
+          status: 'error',
+          message: error instanceof Error ? error.message : 'The Team Library could not be read.',
+          catalog: current[library.id]?.catalog ?? null,
+        },
+      }))
+    }
+  }, [commitStore])
 
   useEffect(() => {
     if (!selectedProject?.sourceFolder) return
@@ -832,6 +971,34 @@ export default function KPIntelligenceShell() {
     }
   }, [selectedProject?.id, selectedProject?.sourceFolder, selectedDashboard?.kind])
 
+  useEffect(() => {
+    if (!selectedTeamLibrary?.enabled) return
+    const state = teamLibraryStates[selectedTeamLibrary.id]
+    if (!state || (state.status === 'idle' && !state.catalog)) {
+      void refreshTeamLibrary(selectedTeamLibrary)
+    }
+
+    let cancelled = false
+    let stop: (() => void) | undefined
+    if (platform.supportsPersistentFolders) {
+      void platform.watchDirectory(selectedTeamLibrary.folderPath, () => {
+        window.clearTimeout(teamLibraryRefreshTimers.current[selectedTeamLibrary.id])
+        teamLibraryRefreshTimers.current[selectedTeamLibrary.id] = window.setTimeout(
+          () => void refreshTeamLibrary(selectedTeamLibrary),
+          900,
+        )
+      }).then((cleanup) => {
+        if (cancelled) cleanup()
+        else stop = cleanup
+      }).catch(() => undefined)
+    }
+    return () => {
+      cancelled = true
+      stop?.()
+      window.clearTimeout(teamLibraryRefreshTimers.current[selectedTeamLibrary.id])
+    }
+  }, [selectedTeamLibrary?.id, selectedTeamLibrary?.folderPath, selectedTeamLibrary?.enabled])
+
   function select(selection: LibrarySelection): void {
     commitStore((current) => {
       const recentDashboardIds = selection.kind === 'dashboard'
@@ -839,6 +1006,217 @@ export default function KPIntelligenceShell() {
         : current.recentDashboardIds
       return { ...current, selection, recentDashboardIds }
     })
+  }
+
+  async function addTeamLibrary(): Promise<void> {
+    if (!platform.supportsPersistentFolders) {
+      showLibraryNotice('Team Libraries are available in the KPIntelligence desktop app.')
+      return
+    }
+    const folderPath = await platform.chooseDirectory({
+      title: 'Choose a synced Team Library folder',
+      canCreateDirectories: true,
+    })
+    if (!folderPath) return
+    const existing = storeRef.current.teamLibraries.find((library) =>
+      library.folderPath.replace(/\\/g, '/').toLowerCase()
+      === folderPath.replace(/\\/g, '/').toLowerCase())
+    if (existing) {
+      select({ kind: 'teamLibrary', id: existing.id })
+      void refreshTeamLibrary(existing)
+      return
+    }
+    const timestamp = now()
+    const library: TeamLibraryRecord = {
+      id: createId('team-library'),
+      name: folderName(folderPath),
+      folderPath,
+      enabled: true,
+      packageCount: 0,
+      lastScannedAt: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }
+    commitStore((current) => ({
+      ...current,
+      teamLibraries: [...current.teamLibraries, library],
+      selection: { kind: 'teamLibrary', id: library.id },
+    }))
+    void refreshTeamLibrary(library)
+  }
+
+  function removeTeamLibrary(id: string): void {
+    const library = storeRef.current.teamLibraries.find((candidate) => candidate.id === id)
+    if (!library) return
+    if (!window.confirm(`Remove “${library.name}” from KPIntelligence? Shared package files will not be changed.`)) return
+    teamLibraryRefreshGeneration.current[id] = (teamLibraryRefreshGeneration.current[id] ?? 0) + 1
+    setTeamLibraryStates((current) => {
+      const next = { ...current }
+      delete next[id]
+      return next
+    })
+    commitStore((current) => ({
+      ...current,
+      teamLibraries: current.teamLibraries.filter((candidate) => candidate.id !== id),
+      selection: current.selection.kind === 'teamLibrary' && current.selection.id === id
+        ? { kind: 'home', id: 'home' }
+        : current.selection,
+    }))
+  }
+
+  async function importDashboardPackage(files: File[]): Promise<void> {
+    const file = files[0]
+    if (!file) return
+    if (!file.name.toLowerCase().endsWith('.kpidashboard')) {
+      showLibraryNotice('Choose a .kpidashboard package.')
+      return
+    }
+    try {
+      const document = await readDashboardPackage(await file.arrayBuffer())
+      setPendingPackage({ document, source: 'package' })
+    } catch (error) {
+      showLibraryNotice(error instanceof Error ? error.message : 'The dashboard package could not be opened.')
+    }
+  }
+
+  function installPendingDashboard(projectId: string): void {
+    if (!pendingPackage) return
+    const sourceState = sourceStatesRef.current[projectId]
+    const rawCatalog = sourceState?.rawCatalog ?? sourceState?.catalog ?? null
+    const project = storeRef.current.projects.find((candidate) => candidate.id === projectId)
+    const configured = project?.sourceRepairs ?? {
+      fieldRepairs: [],
+      reviewedDatasetIds: [],
+    }
+    const proposals = rawCatalog
+      ? sourceRepairProposals(
+          pendingPackage.document.manifest.sourceRequirements,
+          rawCatalog,
+          configured,
+        )
+      : []
+    const sourceRepairs = proposals.length > 0
+      ? { ...configured, fieldRepairs: [...configured.fieldRepairs, ...proposals] }
+      : configured
+    const targetCatalog = rawCatalog ? applySourceRepairs(rawCatalog, sourceRepairs) : null
+    const installed = installDashboardPackage(
+      pendingPackage.document,
+      projectId,
+      pendingPackage.source,
+      targetCatalog,
+    )
+    if (sourceState && rawCatalog && targetCatalog) {
+      setSourceStates((current) => ({
+        ...current,
+        [projectId]: {
+          ...current[projectId],
+          catalog: targetCatalog,
+          rawCatalog,
+        },
+      }))
+    }
+    const existing = storeRef.current.dashboards.filter((dashboard) =>
+      dashboard.id === pendingPackage.document.manifest.templateId
+      || dashboard.template?.id === pendingPackage.document.manifest.templateId)
+    if (existing.length > 0) {
+      const sameVersionCount = existing.filter((dashboard) =>
+        dashboard.template?.version === pendingPackage.document.manifest.templateVersion).length
+      installed.dashboard.name = sameVersionCount > 0
+        ? `${pendingPackage.document.manifest.name} copy ${sameVersionCount + 1}`
+        : `${pendingPackage.document.manifest.name} v${pendingPackage.document.manifest.templateVersion}`
+    }
+    commitStore((current) => ({
+      ...current,
+      projects: current.projects.map((candidate) => candidate.id === projectId
+        ? { ...candidate, sourceRepairs, updatedAt: now() }
+        : candidate),
+      dashboards: [...current.dashboards, installed.dashboard],
+      exportProfiles: installed.exportProfile
+        ? [...current.exportProfiles, installed.exportProfile]
+        : current.exportProfiles,
+      expandedProjectIds: [...new Set([...current.expandedProjectIds, projectId])],
+      recentDashboardIds: [installed.dashboard.id, ...current.recentDashboardIds].slice(0, 12),
+      selection: { kind: 'dashboard', id: installed.dashboard.id },
+    }))
+    const hasRequirements = pendingPackage.document.manifest.sourceRequirements.length > 0
+    const unresolvedCount = installed.unresolvedVisualCount
+      + installed.unresolvedCalculationCount
+      + installed.unresolvedSlicerCount
+    setPendingPackage(null)
+    showLibraryNotice(
+      unresolvedCount > 0
+        ? `Dashboard added. ${unresolvedCount} data binding${unresolvedCount === 1 ? '' : 's'} still need matching columns.`
+        : !targetCatalog && hasRequirements
+        ? 'Dashboard added. Connect the project spreadsheets to finish matching its data.'
+        : 'Dashboard added as an editable copy.',
+    )
+  }
+
+  async function publishDashboardPackage(options: PackagePublishOptions): Promise<void> {
+    if (!selectedDashboard) throw new Error('Open a dashboard before sharing it.')
+    const packageOutput = await createDashboardPackage({
+      dashboard: selectedDashboard,
+      exportProfile,
+      catalog: selectedSource?.catalog ?? null,
+      templateId: selectedDashboard.template?.id ?? selectedDashboard.id,
+      templateVersion: options.templateVersion,
+      author: options.author,
+      category: options.category,
+      minAppVersion: __APP_VERSION__,
+      sourceRepairs: selectedProject?.sourceRepairs,
+      capabilities: [...new Set(selectedDashboard.pages.flatMap((page) =>
+        page.widgets.map((widget) => widget.visualType)))],
+    })
+    if (!options.destinationLibraryId) {
+      const destination = await platform.saveFile(
+        packageOutput.bytes,
+        packageOutput.fileName,
+        [{ name: 'KPIntelligence Dashboard', extensions: ['kpidashboard'] }],
+      )
+      if (!destination) throw new Error('Package save canceled.')
+      return
+    }
+    const library = storeRef.current.teamLibraries.find((candidate) =>
+      candidate.id === options.destinationLibraryId)
+    if (!library) throw new Error('The selected Team Library is no longer available.')
+    if (!platform.writeFileInDirectory) {
+      throw new Error('Publishing directly to Team Libraries requires the desktop app.')
+    }
+    const currentCatalog = await scanTeamLibrary(platform, library)
+    const existingTemplate = currentCatalog.packages
+      .filter((candidate) =>
+        candidate.document.manifest.templateId === packageOutput.document.manifest.templateId)
+      .sort((left, right) => compareSemver(
+        right.document.manifest.templateVersion,
+        left.document.manifest.templateVersion,
+      ))[0]
+    if (
+      existingTemplate
+      && compareSemver(
+        packageOutput.document.manifest.templateVersion,
+        existingTemplate.document.manifest.templateVersion,
+      ) <= 0
+    ) {
+      throw new Error(
+        `Version ${existingTemplate.document.manifest.templateVersion} is already published. Increase the package version before publishing again.`,
+      )
+    }
+    const existingFiles = await platform.listFiles(library.folderPath, {
+      extensions: ['kpidashboard'],
+      maxFiles: 500,
+      maxEntries: 5_000,
+      fileLabel: 'dashboard packages',
+    })
+    if (existingFiles.some((file) =>
+      file.name.toLowerCase() === packageOutput.fileName.toLowerCase())) {
+      throw new Error(`${packageOutput.fileName} already exists. Increase the package version.`)
+    }
+    await platform.writeFileInDirectory(
+      library.folderPath,
+      packageOutput.fileName,
+      packageOutput.bytes,
+    )
+    await refreshTeamLibrary(library)
   }
 
   function createEntity(request: CreateRequest, name: string, dashboardKind: DashboardRecord['kind'] = 'custom'): void {
@@ -873,6 +1251,7 @@ export default function KPIntelligenceShell() {
           sourceFileCount: 0,
           sourceDatasetCount: 0,
           sourceRefreshedAt: null,
+          sourceRepairs: { fieldRepairs: [], reviewedDatasetIds: [] },
           createdAt,
           updatedAt: createdAt,
         }],
@@ -904,6 +1283,7 @@ export default function KPIntelligenceShell() {
           favorite: false,
           pages: page,
           filters: [],
+          calculations: [],
           createdAt,
           updatedAt: createdAt,
         }
@@ -1011,6 +1391,25 @@ export default function KPIntelligenceShell() {
       name: `${source.name} copy`,
       featured: false,
       favorite: false,
+      filters: source.filters.map((filter) => ({
+        ...structuredClone(filter),
+        id: createId('filter'),
+        pageId: filter.pageId ? pageIds.get(filter.pageId) ?? null : null,
+      })),
+      calculations: (source.calculations ?? []).map((calculation) => ({
+        ...structuredClone(calculation),
+        id: createId('calculation'),
+        conditions: calculation.conditions.map((condition) => ({
+          ...condition,
+          id: createId('condition'),
+        })),
+        secondaryConditions: calculation.secondaryConditions.map((condition) => ({
+          ...condition,
+          id: createId('condition'),
+        })),
+        createdAt,
+        updatedAt: createdAt,
+      })),
       pages: source.pages.map((page) => ({
         ...structuredClone(page),
         id: pageIds.get(page.id) ?? createId('page'),
@@ -1020,6 +1419,8 @@ export default function KPIntelligenceShell() {
           query: {
             ...structuredClone(widget.query),
             conditions: widget.query.conditions.map((condition) => ({ ...condition, id: createId('condition') })),
+            secondaryConditions: (widget.query.secondaryConditions ?? [])
+              .map((condition) => ({ ...condition, id: createId('condition') })),
           },
           createdAt,
           updatedAt: createdAt,
@@ -1147,6 +1548,7 @@ export default function KPIntelligenceShell() {
         status: 'loading',
         message: 'Opening the new source folder…',
         catalog: null,
+        rawCatalog: null,
       },
     }))
     setOacSnapshots((current) => ({ ...current, [project.id]: null }))
@@ -1177,7 +1579,12 @@ export default function KPIntelligenceShell() {
     const previousCatalog = sourceStatesRef.current[project.id]?.catalog ?? null
     setSourceStates((current) => ({
       ...current,
-      [project.id]: { status: 'loading', message: 'Profiling imported spreadsheets…', catalog: current[project.id]?.catalog ?? null },
+      [project.id]: {
+        status: 'loading',
+        message: 'Profiling imported spreadsheets…',
+        catalog: current[project.id]?.catalog ?? null,
+        rawCatalog: current[project.id]?.rawCatalog ?? null,
+      },
     }))
     try {
       if (files.length > MAX_PROJECT_SOURCE_FILES) {
@@ -1191,18 +1598,24 @@ export default function KPIntelligenceShell() {
       if (aggregateBytes > MAX_PROJECT_SOURCE_BYTES) {
         throw new Error('The imported spreadsheets exceed the 750 MB project safety limit.')
       }
-      const catalog = await profileSpreadsheetInputs(files)
+      const rawCatalog = await profileSpreadsheetInputs(files)
       if (!isCurrent()) return
+      const sourceRepairs = packageAwareSourceRepairs(storeRef.current, project.id, rawCatalog)
+      const catalog = applySourceRepairs(rawCatalog, sourceRepairs)
       setSourceStates((current) => ({
         ...current,
         [project.id]: {
           status: catalog.warnings.length > 0 ? 'warning' : 'ready',
           message: `${catalog.datasets.length} worksheet${catalog.datasets.length === 1 ? '' : 's'} ready for this session.`,
           catalog,
+          rawCatalog,
         },
       }))
       commitStore((current) => ({
         ...current,
+        projects: current.projects.map((candidate) => candidate.id === project.id
+          ? { ...candidate, sourceRepairs, updatedAt: now() }
+          : candidate),
         dashboards: current.dashboards.map((dashboard) => dashboard.projectId === project.id
           ? rebindDashboardSources(dashboard, catalog, previousCatalog)
           : dashboard),
@@ -1215,6 +1628,7 @@ export default function KPIntelligenceShell() {
           status: 'error',
           message: error instanceof Error ? error.message : 'The spreadsheets could not be imported.',
           catalog: current[project.id]?.catalog ?? null,
+          rawCatalog: current[project.id]?.rawCatalog ?? null,
         },
       }))
     }
@@ -1224,6 +1638,40 @@ export default function KPIntelligenceShell() {
     commitStore((current) => ({
       ...current,
       dashboards: current.dashboards.map((candidate) => candidate.id === dashboard.id ? dashboard : candidate),
+    }))
+  }
+
+  function updateProjectSourceRepairs(
+    projectId: string,
+    sourceRepairs: ProjectSourceRepairs,
+  ): void {
+    const source = sourceStatesRef.current[projectId]
+    const rawCatalog = source?.rawCatalog ?? source?.catalog ?? null
+    if (source && rawCatalog) {
+      const catalog = applySourceRepairs(rawCatalog, sourceRepairs)
+      setSourceStates((current) => ({
+        ...current,
+        [projectId]: {
+          ...current[projectId],
+          catalog,
+          rawCatalog,
+        },
+      }))
+    }
+    commitStore((current) => ({
+      ...current,
+      projects: current.projects.map((project) => project.id === projectId
+        ? { ...project, sourceRepairs, updatedAt: now() }
+        : project),
+      dashboards: rawCatalog
+        ? current.dashboards.map((dashboard) => dashboard.projectId === projectId
+          ? rebindDashboardSources(
+              dashboard,
+              applySourceRepairs(rawCatalog, sourceRepairs),
+              source?.catalog ?? null,
+            )
+          : dashboard)
+        : current.dashboards,
     }))
   }
 
@@ -1273,9 +1721,16 @@ export default function KPIntelligenceShell() {
         <h1>Your dashboard library is protected</h1>
         <p>{libraryLoadError}</p>
         <small>No stored dashboards were changed or replaced.</small>
-        <button className="kp-button primary" type="button" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>
-          <RefreshCw size={16} /> Try again
-        </button>
+        <div className="kp-library-recovery-actions">
+          {libraryBackupAvailable && (
+            <button className="kp-button primary" type="button" onClick={() => void restoreLastLibraryBackup()}>
+              <RefreshCw size={16} /> Restore last backup
+            </button>
+          )}
+          <button className={`kp-button ${libraryBackupAvailable ? 'secondary' : 'primary'}`} type="button" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>
+            <RefreshCw size={16} /> Try again
+          </button>
+        </div>
       </div>
     )
   }
@@ -1331,6 +1786,9 @@ export default function KPIntelligenceShell() {
           onImportFiles={(files) => void importSessionFiles(selectedProject, files)}
           onRefreshSource={() => void refreshProject(selectedProject)}
           onOpenExport={() => setExportOpen(true)}
+          onShare={() => setShareOpen(true)}
+          onSourceRepairsChange={(repairs) =>
+            updateProjectSourceRepairs(selectedProject.id, repairs)}
           onBack={() => select({ kind: 'project', id: selectedProject.id })}
           persistenceStatus={librarySaveState.status}
           persistenceMessage={librarySaveState.message}
@@ -1348,6 +1806,26 @@ export default function KPIntelligenceShell() {
         onCreateDashboard={() => setCreateRequest({ kind: 'dashboard', projectId: selectedProject.id })}
         onChooseSource={() => void chooseSource(selectedProject)}
         onRefresh={() => void refreshProject(selectedProject)}
+      />
+    )
+  } else if (selectedTeamLibrary) {
+    const teamState = teamLibraryStates[selectedTeamLibrary.id] ?? {
+      status: 'idle' as const,
+      message: 'Open this Team Library to scan its shared dashboard packages.',
+      catalog: null,
+    }
+    content = (
+      <TeamLibraryView
+        library={selectedTeamLibrary}
+        status={teamState.status}
+        message={teamState.message}
+        catalog={teamState.catalog}
+        dashboards={store.dashboards}
+        onRefresh={() => void refreshTeamLibrary(selectedTeamLibrary)}
+        onInstall={(file: DashboardPackageFile) => setPendingPackage({
+          document: file.document,
+          source: 'teamLibrary',
+        })}
       />
     )
   } else if (selectedFolder) {
@@ -1393,6 +1871,13 @@ export default function KPIntelligenceShell() {
           if (projectId) setCreateRequest({ kind: 'dashboard', projectId })
           else setCreateRequest({ kind: 'project', folderId: null })
         }}
+        onAddTeamLibrary={() => void addTeamLibrary()}
+        onImportPackage={() => packageInputRef.current?.click()}
+        onRefreshTeamLibrary={(id) => {
+          const library = storeRef.current.teamLibraries.find((candidate) => candidate.id === id)
+          if (library) void refreshTeamLibrary(library)
+        }}
+        onRemoveTeamLibrary={removeTeamLibrary}
         onRename={rename}
         onDelete={deleteEntity}
         onDuplicateDashboard={duplicateDashboard}
@@ -1418,6 +1903,16 @@ export default function KPIntelligenceShell() {
         onShowUpdates={() => setUpdateOpen(true)}
       />
       <div className="kp-content">{content}</div>
+      <input
+        ref={packageInputRef}
+        type="file"
+        hidden
+        accept=".kpidashboard"
+        onChange={(event) => {
+          void importDashboardPackage(Array.from(event.target.files ?? []))
+          event.currentTarget.value = ''
+        }}
+      />
       {librarySaveState.status === 'error' && (
         <div className="library-save-error" role="alert">
           <AlertTriangle size={16} />
@@ -1433,6 +1928,26 @@ export default function KPIntelligenceShell() {
         </div>
       )}
       <CreateModal request={createRequest} projects={store.projects} onClose={() => setCreateRequest(null)} onCreate={createEntity} />
+      <ShareDashboardModal
+        open={shareOpen}
+        dashboard={selectedDashboard}
+        teamLibraries={store.teamLibraries}
+        canPublishToLibrary={Boolean(platform.writeFileInDirectory)}
+        onClose={() => setShareOpen(false)}
+        onPublish={publishDashboardPackage}
+      />
+      <PackageInstallModal
+        pending={pendingPackage?.document ?? null}
+        source={pendingPackage?.source ?? 'package'}
+        projects={store.projects}
+        defaultProjectId={selectedProject?.id
+          ?? store.dashboards
+            .find((dashboard) => dashboard.id === store.recentDashboardIds[0])
+            ?.projectId
+          ?? null}
+        onClose={() => setPendingPackage(null)}
+        onInstall={installPendingDashboard}
+      />
       <UpdateModal
         open={updateOpen}
         onClose={() => setUpdateOpen(false)}
@@ -1448,8 +1963,14 @@ export default function KPIntelligenceShell() {
         profile={exportProfile}
         dashboard={selectedDashboard}
         canExport={Boolean(
-          selectedSource?.catalog
-          && (selectedSource.status === 'ready' || selectedSource.status === 'warning'),
+          selectedDashboard
+          && (
+            !dashboardHasDataBindings(selectedDashboard)
+            || (
+              selectedSource?.catalog
+              && (selectedSource.status === 'ready' || selectedSource.status === 'warning')
+            )
+          ),
         )}
         onClose={() => setExportOpen(false)}
         onChange={updateExportProfile}

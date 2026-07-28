@@ -1,10 +1,16 @@
 import { join } from '@tauri-apps/api/path'
 import { open, save } from '@tauri-apps/plugin-dialog'
-import { readDir, readFile, stat, watch, writeFile } from '@tauri-apps/plugin-fs'
+import { readDir, readFile, remove, rename, stat, watch, writeFile } from '@tauri-apps/plugin-fs'
 import { relaunch } from '@tauri-apps/plugin-process'
 import { load, type Store } from '@tauri-apps/plugin-store'
 import { check, type Update } from '@tauri-apps/plugin-updater'
-import type { DesktopUpdateInfo, PlatformBridge, SaveFileFilter, SourceFileDescriptor } from './types'
+import type {
+  DesktopUpdateInfo,
+  ListFileOptions,
+  PlatformBridge,
+  SaveFileFilter,
+  SourceFileDescriptor,
+} from './types'
 
 const STORE_PATH = 'kpintelligence.json'
 const LEGACY_STORE_PATH = 'qcx-intelligence.json'
@@ -12,7 +18,7 @@ const LEGACY_STORE_KEYS = ['workspaces'] as const
 const MAX_DIRECTORY_DEPTH = 20
 const MAX_DISCOVERED_SOURCE_FILES = 2000
 const MAX_SCANNED_DIRECTORY_ENTRIES = 10_000
-const SOURCE_EXTENSIONS = new Set(['csv', 'xls', 'xlsx', 'zip'])
+const SOURCE_EXTENSIONS = ['csv', 'xls', 'xlsx', 'zip']
 let storePromise: Promise<Store> | null = null
 let pendingUpdate: Update | null = null
 
@@ -36,9 +42,9 @@ function getStore(): Promise<Store> {
   return storePromise
 }
 
-function isSourceFileName(name: string): boolean {
+function hasExtension(name: string, extensions: ReadonlySet<string>): boolean {
   const extension = name.split('.').pop()?.toLowerCase() ?? ''
-  return SOURCE_EXTENSIONS.has(extension)
+  return extensions.has(extension)
 }
 
 function shouldIgnoreEntry(name: string): boolean {
@@ -50,52 +56,58 @@ function shouldIgnoreEntry(name: string): boolean {
 
 async function walkDirectory(
   rootPath: string,
+  options: ListFileOptions = {},
   depth = 0,
-  state: { files: SourceFileDescriptor[]; scannedEntries: number } = {
-    files: [],
-    scannedEntries: 0,
-  },
+  state?: { files: SourceFileDescriptor[]; scannedEntries: number },
 ): Promise<SourceFileDescriptor[]> {
+  const currentState = state ?? { files: [], scannedEntries: 0 }
+  const extensions = new Set(
+    (options.extensions ?? SOURCE_EXTENSIONS)
+      .map((extension) => extension.replace(/^\./, '').toLowerCase()),
+  )
+  const maxFiles = options.maxFiles ?? MAX_DISCOVERED_SOURCE_FILES
+  const maxEntries = options.maxEntries ?? MAX_SCANNED_DIRECTORY_ENTRIES
+  const fileLabel = options.fileLabel ?? 'spreadsheet files'
   if (depth > MAX_DIRECTORY_DEPTH) {
     throw new Error(`The selected folder is nested more than ${MAX_DIRECTORY_DEPTH} levels deep. Choose a narrower project folder.`)
   }
   const entries = await readDir(rootPath)
   for (const entry of entries) {
-    state.scannedEntries += 1
-    if (state.scannedEntries > MAX_SCANNED_DIRECTORY_ENTRIES) {
-      throw new Error(`The selected folder contains more than ${MAX_SCANNED_DIRECTORY_ENTRIES.toLocaleString()} files and folders. Choose a narrower project folder.`)
+    currentState.scannedEntries += 1
+    if (currentState.scannedEntries > maxEntries) {
+      throw new Error(`The selected folder contains more than ${maxEntries.toLocaleString()} files and folders. Choose a narrower folder.`)
     }
     if (shouldIgnoreEntry(entry.name)) continue
     const path = await join(rootPath, entry.name)
     if (entry.isDirectory && !entry.isSymlink) {
-      await walkDirectory(path, depth + 1, state)
+      await walkDirectory(path, options, depth + 1, currentState)
       continue
     }
-    if (!entry.isFile || entry.isSymlink || !isSourceFileName(entry.name)) continue
-    if (state.files.length >= MAX_DISCOVERED_SOURCE_FILES) {
-      throw new Error(`The selected folder contains more than ${MAX_DISCOVERED_SOURCE_FILES} spreadsheet files. Choose a narrower project folder.`)
+    if (!entry.isFile || entry.isSymlink || !hasExtension(entry.name, extensions)) continue
+    if (currentState.files.length >= maxFiles) {
+      throw new Error(`The selected folder contains more than ${maxFiles.toLocaleString()} ${fileLabel}. Choose a narrower folder.`)
     }
     const info = await stat(path)
-    state.files.push({
+    currentState.files.push({
       path,
       name: entry.name,
       size: info.size,
       modifiedAt: info.mtime?.getTime() ?? 0,
     })
   }
-  return state.files
+  return currentState.files
 }
 
 export const tauriPlatform: PlatformBridge = {
   kind: 'tauri',
   supportsPersistentFolders: true,
-  async chooseDirectory(): Promise<string | null> {
+  async chooseDirectory(options): Promise<string | null> {
     const selected = await open({
-      title: 'Choose a synced SharePoint or OneDrive folder',
+      title: options?.title ?? 'Choose a synced SharePoint or OneDrive folder',
       directory: true,
       recursive: true,
       multiple: false,
-      canCreateDirectories: false,
+      canCreateDirectories: options?.canCreateDirectories ?? false,
       fileAccessMode: 'scoped',
     })
     return typeof selected === 'string' ? selected : null
@@ -117,6 +129,21 @@ export const tauriPlatform: PlatformBridge = {
     const destination = await save({ title: `Save ${defaultName}`, defaultPath: defaultName, filters })
     if (!destination) return null
     await writeFile(destination, data)
+    return destination
+  },
+  async writeFileInDirectory(directory: string, fileName: string, data: Uint8Array): Promise<string> {
+    const destination = await join(directory, fileName)
+    const temporary = await join(
+      directory,
+      `.${fileName}.${Date.now().toString(36)}.tmp`,
+    )
+    try {
+      await writeFile(temporary, data)
+      await rename(temporary, destination)
+    } catch (error) {
+      await remove(temporary).catch(() => undefined)
+      throw error
+    }
     return destination
   },
   async checkForUpdate(): Promise<DesktopUpdateInfo | null> {

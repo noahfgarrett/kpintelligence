@@ -10,6 +10,9 @@
     "dialog:default",
     "fs:default",
     "fs:allow-watch",
+    "fs:allow-write-file",
+    "fs:allow-rename",
+    "fs:allow-remove",
     "store:default",
     "updater:default",
     "process:allow-restart"

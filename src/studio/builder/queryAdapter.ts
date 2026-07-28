@@ -10,28 +10,83 @@ import { executeQuery, type QueryResult } from '../domain/query'
 import type { DatasetProfile, FieldProfile, ProfiledRawValue } from '../data'
 import type { ChartDataPoint } from '../renderers/chartOptions'
 import type { DashboardFilterRecord, StudioCondition, StudioWidgetQuery } from '../library/model'
+import { resolveWorkWeekPreset, workWeekPresetLabel } from './relativePeriods'
 
 export interface StudioQueryOutput {
   result: QueryResult
+  secondaryResult?: QueryResult
   points: ChartDataPoint[]
   fields: FieldV1[]
   records: Record<string, unknown>[]
 }
 
+export function dashboardFiltersForWidget(
+  filters: DashboardFilterRecord[],
+  widgetId: string,
+): DashboardFilterRecord[] {
+  return filters.filter((filter) => filter.sourceWidgetId !== widgetId)
+}
+
+export function resolveDashboardFilterField(
+  filter: DashboardFilterRecord,
+  dataset: DatasetProfile,
+): FieldProfile | null {
+  const binding = filter.bindings?.find((candidate) => candidate.datasetId === dataset.id)
+  if (binding) {
+    const exact = dataset.fields.find((field) => field.id === binding.fieldId)
+    if (exact && exact.inferredType === binding.fieldType) return exact
+    const keyed = dataset.fields.filter((field) =>
+      field.key === binding.fieldKey && field.inferredType === binding.fieldType)
+    if (keyed.length === 1) return keyed[0]
+    const named = dataset.fields.filter((field) =>
+      field.inferredType === binding.fieldType
+      && [
+        field.name,
+        field.headerDisplay,
+        field.key,
+      ].some((name) => name.trim().toLowerCase() === binding.fieldName.trim().toLowerCase()))
+    if (named.length === 1) return named[0]
+    return null
+  }
+
+  const normalizedName = filter.fieldName.trim().toLowerCase()
+  const expectedType = filter.fieldType ?? filter.bindings?.[0]?.fieldType
+  const matches = dataset.fields.filter((candidate) =>
+    (!expectedType || candidate.inferredType === expectedType)
+    && (
+      candidate.name.trim().toLowerCase() === normalizedName
+      || candidate.headerDisplay.trim().toLowerCase() === normalizedName
+      || candidate.key.trim().toLowerCase() === normalizedName
+    ))
+  return matches.length === 1 ? matches[0] : null
+}
+
 export function dashboardFilterConditions(
   filters: DashboardFilterRecord[],
   dataset: DatasetProfile,
+  pageId?: string,
 ): StudioCondition[] {
   return filters.flatMap((filter) => {
-    if (!filter.enabled || !filter.value) return []
-    const field = dataset.fields.find((candidate) =>
-      candidate.name.trim().toLowerCase() === filter.fieldName.trim().toLowerCase())
+    const values = filter.values === undefined
+      ? filter.value ? [filter.value] : []
+      : filter.values
+    if (
+      !filter.enabled
+      || values.length === 0
+      || ((filter.scope ?? 'dashboard') === 'page' && filter.pageId !== pageId)
+    ) return []
+    const field = resolveDashboardFilterField(filter, dataset)
     if (!field) return []
+    const multiple = values.length > 1 || (filter.selectionMode ?? 'single') === 'multiple'
+    const exclude = (filter.operator ?? 'include') === 'exclude'
     return [{
       id: `dashboard-${filter.id}`,
       fieldId: field.id,
-      operator: 'equals',
-      value: filter.value,
+      operator: multiple
+        ? exclude ? 'notOneOf' : 'oneOf'
+        : exclude ? 'notEquals' : 'equals',
+      value: values[0] ?? '',
+      values,
     }]
   })
 }
@@ -46,23 +101,28 @@ export function fieldType(field: FieldProfile): FieldDataTypeV1 {
 
 export function domainFields(dataset: DatasetProfile): FieldV1[] {
   const createdAt = now()
-  return dataset.fields.map((field) => ({
-    schemaVersion: 1,
-    id: field.id,
-    kind: 'field',
-    datasetId: dataset.id,
-    name: field.name,
-    sourceColumn: field.id,
-    aliases: [],
-    dataType: fieldType(field),
-    nullable: field.blankCount > 0,
-    coercion: {
-      trimText: true,
-      emptyTextIsBlank: true,
-    },
-    createdAt,
-    updatedAt: createdAt,
-  }))
+  return dataset.fields.map((field) => {
+    const percent = field.inferredType === 'number'
+      && field.sampleValues.some((sample) => sample.display.trim().endsWith('%'))
+    return {
+      schemaVersion: 1,
+      id: field.id,
+      kind: 'field',
+      datasetId: dataset.id,
+      name: field.name,
+      sourceColumn: field.id,
+      aliases: [],
+      dataType: fieldType(field),
+      nullable: field.blankCount > 0,
+      coercion: {
+        trimText: true,
+        emptyTextIsBlank: true,
+      },
+      ...(percent ? { format: { numberStyle: 'percent' as const } } : {}),
+      createdAt,
+      updatedAt: createdAt,
+    }
+  })
 }
 
 export function datasetRecords(dataset: DatasetProfile): Record<string, unknown>[] {
@@ -93,28 +153,33 @@ function scalarLiteral(type: FieldDataTypeV1, input: string): ScalarLiteralV1 {
 function conditionPredicate(
   condition: StudioCondition,
   field: FieldProfile,
+  evaluationDate: Date,
 ): PredicateConditionV1 {
-  if (condition.operator === 'isBlank' || condition.operator === 'isNotBlank') {
+  const preset = field.inferredType === 'workWeek'
+    ? resolveWorkWeekPreset(condition.value, evaluationDate)
+    : null
+  const resolved = preset ? { ...condition, ...preset } : condition
+  if (resolved.operator === 'isBlank' || resolved.operator === 'isNotBlank') {
     return {
       kind: 'condition',
       fieldId: field.id,
-      operator: condition.operator,
+      operator: resolved.operator,
     }
   }
-  if (condition.operator === 'oneOf' || condition.operator === 'notOneOf') {
+  if (resolved.operator === 'oneOf' || resolved.operator === 'notOneOf') {
     return {
       kind: 'condition',
       fieldId: field.id,
-      operator: condition.operator,
-      values: condition.value
+      operator: resolved.operator,
+      values: (resolved.values ?? resolved.value
         .split(',')
         .map((value) => value.trim())
-        .filter(Boolean)
+        .filter(Boolean))
         .map((value) => scalarLiteral(fieldType(field), value)),
     }
   }
-  if (condition.operator === 'between') {
-    const [lower = '', upper = ''] = condition.value.split('..', 2)
+  if (resolved.operator === 'between') {
+    const [lower = '', upper = ''] = resolved.value.split('..', 2)
     return {
       kind: 'condition',
       fieldId: field.id,
@@ -127,8 +192,8 @@ function conditionPredicate(
   return {
     kind: 'condition',
     fieldId: field.id,
-    operator: condition.operator,
-    value: scalarLiteral(fieldType(field), condition.value),
+    operator: resolved.operator,
+    value: scalarLiteral(fieldType(field), resolved.value),
   }
 }
 
@@ -136,6 +201,7 @@ function conditionsForDataset(
   conditions: StudioCondition[],
   dataset: DatasetProfile,
   strict: boolean,
+  evaluationDate: Date,
 ): PredicateConditionV1[] {
   return conditions.flatMap((condition) => {
     const field = dataset.fields.find((candidate) => candidate.id === condition.fieldId)
@@ -145,7 +211,7 @@ function conditionsForDataset(
       }
       return []
     }
-    return [conditionPredicate(condition, field)]
+    return [conditionPredicate(condition, field, evaluationDate)]
   })
 }
 
@@ -153,9 +219,10 @@ function wherePredicate(
   query: StudioWidgetQuery,
   dataset: DatasetProfile,
   dashboardConditions: StudioCondition[],
+  evaluationDate: Date,
 ): PredicateV1 | undefined {
-  const localConditions = conditionsForDataset(query.conditions, dataset, true)
-  const globalConditions = conditionsForDataset(dashboardConditions, dataset, false)
+  const localConditions = conditionsForDataset(query.conditions, dataset, true, evaluationDate)
+  const globalConditions = conditionsForDataset(dashboardConditions, dataset, false, evaluationDate)
   const localPredicate: PredicateV1 | undefined = localConditions.length > 0 ? {
     kind: 'group',
     mode: query.match,
@@ -189,13 +256,20 @@ export function sentenceForQuery(query: StudioWidgetQuery, dataset?: DatasetProf
     first: 'First',
     last: 'Last',
   }
+  const preset = query.conditions
+    .map((condition) => workWeekPresetLabel(condition.value))
+    .find((label): label is string => Boolean(label))
   const filterText = query.conditions.length > 0
-    ? ` where ${query.conditions.length} ${query.match === 'all' ? 'rule' : 'alternative'}${query.conditions.length === 1 ? '' : 's'} match`
+    ? ` where ${preset ?? `${query.conditions.length} ${query.match === 'all' ? 'rule' : 'alternative'}${query.conditions.length === 1 ? '' : 's'} match`}`
     : ''
   const secondary = query.secondaryAggregation
     ? ` and ${aggregateLabels[query.secondaryAggregation]}${secondaryMeasure ? ` of ${secondaryMeasure.name}` : ''}`
     : ''
-  const transform = query.resultTransform === 'percentOfTotal'
+  const transform = query.metricCalculation === 'ratioPercent'
+    ? ' as a percentage of the second calculation'
+    : query.metricCalculation === 'difference'
+      ? ' as the difference between the calculations'
+      : query.resultTransform === 'percentOfTotal'
     ? ' as percent of total'
     : query.resultTransform === 'runningTotal'
       ? ' as a running total'
@@ -207,7 +281,46 @@ export function runStudioQuery(
   query: StudioWidgetQuery,
   dataset: DatasetProfile,
   dashboardConditions: StudioCondition[] = [],
+  evaluationDate = new Date(),
 ): StudioQueryOutput {
+  if (query.secondaryAggregation && query.secondaryRuleMode === 'custom') {
+    const primary = runStudioQuery({
+      ...query,
+      secondaryAggregation: null,
+      secondaryMeasureFieldId: null,
+      metricCalculation: 'none',
+    }, dataset, dashboardConditions, evaluationDate)
+    const secondary = runStudioQuery({
+      ...query,
+      aggregation: query.secondaryAggregation,
+      measureFieldId: query.secondaryMeasureFieldId,
+      secondaryAggregation: null,
+      secondaryMeasureFieldId: null,
+      metricCalculation: 'none',
+      match: query.secondaryMatch ?? 'all',
+      conditions: query.secondaryConditions ?? [],
+    }, dataset, dashboardConditions, evaluationDate)
+    const keyFor = (point: ChartDataPoint) => `${point.category}\u0000${point.series ?? 'Value'}`
+    const secondaryValues = new Map(
+      secondary.points.map((point) => [keyFor(point), point.value]),
+    )
+    const primaryPoints = primary.points.map((point) => ({
+      ...point,
+      secondaryValue: secondaryValues.get(keyFor(point)) ?? 0,
+      x: point.value,
+      y: secondaryValues.get(keyFor(point)) ?? 0,
+    }))
+    const points = applyMetricCalculation([
+      ...primaryPoints,
+      ...secondary.points.map((point) => ({ ...point, series: 'Secondary' })),
+    ], query.metricCalculation)
+    return {
+      ...primary,
+      secondaryResult: secondary.result,
+      points,
+    }
+  }
+
   const fields = domainFields(dataset)
   const records = datasetRecords(dataset)
   const aggregationId = 'value'
@@ -242,7 +355,7 @@ export function runStudioQuery(
     schemaVersion: 1,
     id: `query-${dataset.id}`,
     datasetId: dataset.id,
-    where: wherePredicate(query, dataset, dashboardConditions),
+    where: wherePredicate(query, dataset, dashboardConditions, evaluationDate),
     groupBy,
     aggregations,
     orderBy: query.groupByFieldId
@@ -292,7 +405,9 @@ export function runStudioQuery(
     })
     points = points.map((point) => ({
       ...point,
-      value: (point.value / Math.max(1, totals.get(point.series ?? 'Value') ?? 0)) * 100,
+      value: (totals.get(point.series ?? 'Value') ?? 0) === 0
+        ? Number.NaN
+        : point.value / (totals.get(point.series ?? 'Value') ?? 0) * 100,
     }))
   } else if (query.resultTransform === 'runningTotal') {
     const totals = new Map<string, number>()
@@ -317,7 +432,31 @@ export function runStudioQuery(
       }
     })
   }
+  points = applyMetricCalculation(points, query.metricCalculation)
   return { result, points, fields, records }
+}
+
+function applyMetricCalculation(
+  points: ChartDataPoint[],
+  calculation: StudioWidgetQuery['metricCalculation'],
+): ChartDataPoint[] {
+  if (!calculation || calculation === 'none') return points
+  return points
+    .filter((point) => point.series !== 'Secondary')
+    .map((point) => {
+      const secondaryValue = point.secondaryValue ?? points.find((candidate) =>
+        candidate.series === 'Secondary' && candidate.category === point.category)?.value ?? 0
+      const primaryValue = point.value
+      const value = calculation === 'ratioPercent'
+        ? secondaryValue === 0 ? Number.NaN : primaryValue / secondaryValue * 100
+        : primaryValue - secondaryValue
+      return {
+        ...point,
+        primaryValue,
+        secondaryValue,
+        value,
+      }
+    })
 }
 
 export function displayCell(value: ProfiledRawValue): string {

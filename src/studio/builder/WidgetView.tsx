@@ -17,6 +17,7 @@ interface WidgetViewProps {
   selected: boolean
   editable: boolean
   dashboardFilters?: DashboardFilterRecord[]
+  pageId?: string
   showQueryContext?: boolean
   tableRowStart?: number
   tableRowLimit?: number | null
@@ -26,6 +27,7 @@ interface WidgetViewProps {
 }
 
 function formatMetric(value: number, widget: StudioWidgetRecord): string {
+  if (!Number.isFinite(value)) return '—'
   if (widget.appearance.valueFormat === 'percent') {
     return `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })}%`
   }
@@ -39,12 +41,25 @@ function formatMetric(value: number, widget: StudioWidgetRecord): string {
   return value.toLocaleString(undefined, { maximumFractionDigits: 1 })
 }
 
+function compareTableValues(left: unknown, right: unknown): number {
+  if (left === right) return 0
+  if (left === null || left === undefined || left === '') return 1
+  if (right === null || right === undefined || right === '') return -1
+  if (left instanceof Date && right instanceof Date) return left.getTime() - right.getTime()
+  if (typeof left === 'number' && typeof right === 'number') return left - right
+  return String(left).localeCompare(String(right), undefined, {
+    numeric: true,
+    sensitivity: 'base',
+  })
+}
+
 export default function WidgetView({
   widget,
   dataset,
   selected,
   editable,
   dashboardFilters = [],
+  pageId,
   showQueryContext,
   tableRowStart = 0,
   tableRowLimit = 50,
@@ -53,13 +68,16 @@ export default function WidgetView({
   onMenu,
 }: WidgetViewProps) {
   const dashboardConditions = useMemo(
-    () => dataset ? dashboardFilterConditions(dashboardFilters, dataset) : [],
-    [dashboardFilters, dataset],
+    () => dataset ? dashboardFilterConditions(dashboardFilters, dataset, pageId) : [],
+    [dashboardFilters, dataset, pageId],
   )
   const output = useMemo(() => {
     if (!dataset || widget.visualType === 'text') return null
     try {
-      return { value: runStudioQuery(widget.query, dataset, dashboardConditions), error: null }
+      const query = widget.visualType === 'combo' && widget.query.seriesFieldId
+        ? { ...widget.query, seriesFieldId: null }
+        : widget.query
+      return { value: runStudioQuery(query, dataset, dashboardConditions), error: null }
     } catch (error) {
       return {
         value: null,
@@ -68,20 +86,52 @@ export default function WidgetView({
     }
   }, [dashboardConditions, dataset, widget.query, widget.visualType])
 
-  const metric = output?.value?.points[0]?.value ?? 0
+  const firstPoint = output?.value?.points.find((point) => point.series !== 'Secondary')
+  const metric = firstPoint?.value ?? 0
+  const primaryMetric = firstPoint?.primaryValue ?? firstPoint?.value ?? 0
+  const secondaryMetric = firstPoint?.secondaryValue
+    ?? output?.value?.points.find((point) => point.series === 'Secondary')?.value
+    ?? 0
   const target = widget.appearance.target ?? 100
   const showContext = showQueryContext ?? editable
   const sentence = sentenceForQuery(widget.query, dataset)
-  const chartPoints = widget.visualType === 'scatter'
+  const chartPoints = (widget.visualType === 'scatter'
     ? (output?.value?.points ?? []).filter((point) => point.series !== 'Secondary')
-    : output?.value?.points ?? []
-  const tableFields = dataset
-    ? (widget.query.tableFieldIds.length > 0
-        ? widget.query.tableFieldIds
-          .map((fieldId) => dataset.fields.find((field) => field.id === fieldId))
-          .filter((field): field is DatasetProfile['fields'][number] => Boolean(field))
-        : dataset.fields.slice(0, 6))
-    : []
+    : output?.value?.points ?? []).map((point) => {
+      if (widget.query.seriesFieldId) return point
+      if (point.series === 'Secondary') {
+        return { ...point, series: widget.appearance.secondaryLabel || 'Secondary' }
+      }
+      return { ...point, series: widget.appearance.primaryLabel || 'Value' }
+    })
+  const noMatchingRows = Boolean(dataset && output?.value
+    && output.value.result.diagnostics.matchedRows === 0)
+  const tableFields = useMemo(() => dataset
+    ? widget.query.tableFieldIds
+      .map((fieldId) => dataset.fields.find((field) => field.id === fieldId))
+      .filter((field): field is DatasetProfile['fields'][number] => Boolean(field))
+    : [], [dataset, widget.query.tableFieldIds])
+  const supportsPointInteraction = Boolean(
+    onPointClick
+    && widget.query.groupByFieldId
+    && !['gauge', 'radar'].includes(widget.visualType),
+  )
+  const tableRowIndices = useMemo(() => {
+    const indices = [...(output?.value?.result.diagnostics.matchedRowIndices ?? [])]
+    if (!dataset || widget.visualType !== 'table' || indices.length < 2) return indices
+    const categoryField = tableFields[0]
+    const numericField = dataset.fields.find((field) =>
+      field.id === widget.query.measureFieldId && field.inferredType === 'number')
+      ?? tableFields.find((field) => field.inferredType === 'number')
+      ?? categoryField
+    const sortField = widget.query.sort.startsWith('value') ? numericField : categoryField
+    if (!sortField) return indices
+    const direction = widget.query.sort.endsWith('Descending') ? -1 : 1
+    return indices.sort((leftIndex, rightIndex) => direction * compareTableValues(
+      dataset.rows[leftIndex]?.cells[sortField.id]?.raw,
+      dataset.rows[rightIndex]?.cells[sortField.id]?.raw,
+    ))
+  }, [dataset, output?.value?.result.diagnostics.matchedRowIndices, tableFields, widget.query.measureFieldId, widget.query.sort, widget.visualType])
 
   return (
     <article
@@ -134,10 +184,34 @@ export default function WidgetView({
             <strong>Check this visual</strong>
             <span>{output.error}</span>
           </div>
+        ) : widget.visualType === 'table' && tableFields.length === 0 ? (
+          <div className="studio-widget-empty">
+            <Database size={20} />
+            <strong>Add table columns</strong>
+            <span>Drop or choose the columns this table should show.</span>
+          </div>
+        ) : noMatchingRows && !['kpi', 'splitKpi', 'progress', 'gauge'].includes(widget.visualType) ? (
+          <div className="studio-widget-empty">
+            <Database size={20} />
+            <strong>No rows match</strong>
+            <span>Adjust this visual's rules or the dashboard filters.</span>
+          </div>
         ) : widget.visualType === 'kpi' ? (
           <div className="studio-kpi">
             <strong>{formatMetric(metric, widget)}</strong>
             {showContext && <span>{sentence}</span>}
+          </div>
+        ) : widget.visualType === 'splitKpi' ? (
+          <div className="studio-split-kpi">
+            <div>
+              <span>{widget.appearance.primaryLabel || 'Overall'}</span>
+              <strong>{formatMetric(primaryMetric, widget)}</strong>
+            </div>
+            <div>
+              <span>{widget.appearance.secondaryLabel || 'Current period'}</span>
+              <strong>{formatMetric(secondaryMetric, widget)}</strong>
+            </div>
+            {showContext && <small>{sentence}</small>}
           </div>
         ) : widget.visualType === 'progress' ? (
           <div className="studio-progress">
@@ -159,7 +233,7 @@ export default function WidgetView({
                 </tr>
               </thead>
               <tbody>
-                {(output?.value?.result.diagnostics.matchedRowIndices ?? [])
+                {tableRowIndices
                   .slice(
                     tableRowStart,
                     tableRowLimit === null ? undefined : tableRowStart + tableRowLimit,
@@ -186,18 +260,27 @@ export default function WidgetView({
               smooth: widget.appearance.smooth,
               primaryColor: widget.appearance.palette[0],
               secondaryColor: widget.appearance.palette[1],
+              palette: widget.appearance.palette,
+              secondarySeriesName: widget.appearance.secondaryLabel || 'Secondary',
               valueFormat: widget.appearance.valueFormat,
               currencyCode: widget.appearance.currencyCode,
               target,
               xAxisTitle: widget.appearance.xAxisTitle,
               yAxisTitle: widget.appearance.yAxisTitle,
+              secondaryYAxisTitle: widget.appearance.secondaryYAxisTitle,
               axisLabelRotation: widget.appearance.axisLabelRotation,
               showGrid: widget.appearance.showGrid,
+              showReferenceLine: widget.appearance.showReferenceLine,
+              referenceLineValue: widget.appearance.referenceLineValue,
+              referenceLineLabel: widget.appearance.referenceLineLabel,
+              referenceLineColor: widget.appearance.referenceLineColor,
             })}
             ariaLabel={`${widget.title}. ${sentence}`}
-            onPointClick={(category, dataIndex) => {
-              onPointClick?.(category || chartPoints[dataIndex]?.category || '')
-            }}
+            onPointClick={supportsPointInteraction
+              ? (category, dataIndex) => {
+                  onPointClick?.(category || chartPoints[dataIndex]?.category || '')
+                }
+              : undefined}
           />
         )}
       </div>

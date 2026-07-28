@@ -20,10 +20,16 @@ export default function EChart({ option, ariaLabel, onPointClick }: EChartProps)
     const resizeObserver = new ResizeObserver(() => chart.resize())
     resizeObserver.observe(host)
     chart.on('click', (params) => {
+      const objectCategory = params.data
+        && typeof params.data === 'object'
+        && !Array.isArray(params.data)
+        && 'rawCategory' in params.data
+        ? String((params.data as { rawCategory?: unknown }).rawCategory ?? '')
+        : ''
       const dataCategory = Array.isArray(params.data) && params.data.length > 2
         ? String(params.data[2] ?? '')
         : ''
-      clickRef.current?.(String(params.name ?? dataCategory), params.dataIndex)
+      clickRef.current?.(objectCategory || dataCategory || String(params.name ?? ''), params.dataIndex)
     })
     return () => {
       resizeObserver.disconnect()
@@ -40,14 +46,8 @@ export default function EChart({ option, ariaLabel, onPointClick }: EChartProps)
     <div
       ref={hostRef}
       className="studio-echart"
-      role={onPointClick ? 'button' : 'img'}
-      tabIndex={onPointClick ? 0 : undefined}
-      aria-label={onPointClick ? `${ariaLabel}. Press Enter to view contributing rows.` : ariaLabel}
-      onKeyDown={(event) => {
-        if (!onPointClick || (event.key !== 'Enter' && event.key !== ' ')) return
-        event.preventDefault()
-        onPointClick('', 0)
-      }}
+      role="img"
+      aria-label={ariaLabel}
     />
   )
 }

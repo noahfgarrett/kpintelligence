@@ -4,6 +4,7 @@ import type { StudioVisualType } from './catalog'
 export interface ChartDataPoint {
   category: string
   value: number
+  primaryValue?: number
   secondaryValue?: number
   series?: string
   x?: number
@@ -17,13 +18,20 @@ export interface ChartAppearance {
   smooth?: boolean
   primaryColor?: string
   secondaryColor?: string
+  palette?: string[]
+  secondarySeriesName?: string
   target?: number
   valueFormat?: 'number' | 'percent' | 'currency'
   currencyCode?: string
   xAxisTitle?: string
   yAxisTitle?: string
+  secondaryYAxisTitle?: string
   axisLabelRotation?: number
   showGrid?: boolean
+  showReferenceLine?: boolean
+  referenceLineValue?: number
+  referenceLineLabel?: string
+  referenceLineColor?: string
 }
 
 const COLORS = ['#2E5AAC', '#0D6331', '#C2870B', '#EC6152', '#6B5CA5', '#27808C']
@@ -34,6 +42,7 @@ const AXIS = {
 }
 
 function chartColors(appearance: ChartAppearance): string[] {
+  if (appearance.palette && appearance.palette.length > 0) return appearance.palette
   return [
     appearance.primaryColor ?? COLORS[0],
     appearance.secondaryColor ?? COLORS[1],
@@ -41,11 +50,65 @@ function chartColors(appearance: ChartAppearance): string[] {
   ]
 }
 
+function compactWorkWeekLabel(value: string): string {
+  const match = /^WW\s*(\d{1,2})\s*['’/-]\s*\d{2,4}$/i.exec(value.trim())
+  return match ? `WW${String(Number(match[1])).padStart(2, '0')}` : value
+}
+
+function referenceMarkLine(
+  appearance: ChartAppearance,
+  horizontal: boolean,
+): SeriesOption['markLine'] {
+  if (!appearance.showReferenceLine) return undefined
+  const value = appearance.referenceLineValue ?? 0
+  const label = appearance.referenceLineLabel?.trim() || 'Target'
+  return {
+    silent: true,
+    symbol: ['none', 'none'],
+    lineStyle: {
+      color: appearance.referenceLineColor || '#d92d20',
+      type: 'dashed',
+      width: 1.5,
+    },
+    label: {
+      show: true,
+      formatter: label,
+      color: appearance.referenceLineColor || '#d92d20',
+      fontSize: 10,
+      fontWeight: 600,
+      position: horizontal ? 'insideEndTop' : 'insideMiddleTop',
+    },
+    data: [horizontal ? { xAxis: value, name: label } : { yAxis: value, name: label }],
+  } as SeriesOption['markLine']
+}
+
+function referenceAxisBounds(
+  values: number[],
+  appearance: ChartAppearance,
+): { min?: number; max?: number } {
+  const reference = appearance.referenceLineValue
+  if (
+    !appearance.showReferenceLine
+    || reference === undefined
+    || !Number.isFinite(reference)
+  ) return {}
+
+  const finiteValues = values.filter(Number.isFinite)
+  const minimum = Math.min(0, reference, ...finiteValues)
+  const maximum = Math.max(0, reference, ...finiteValues)
+  const span = Math.max(1, maximum - minimum)
+  return {
+    min: minimum < 0 ? minimum - span * 0.08 : 0,
+    max: maximum + span * 0.08,
+  }
+}
+
 function formatValue(
   value: number,
   format: ChartAppearance['valueFormat'],
   currencyCode = 'USD',
 ): string {
+  if (!Number.isFinite(value)) return '—'
   if (format === 'percent') return `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })}%`
   if (format === 'currency') {
     return value.toLocaleString(undefined, {
@@ -76,7 +139,11 @@ function cartesianBase(appearance: ChartAppearance): EChartsOption {
       name: appearance.xAxisTitle,
       nameLocation: 'middle',
       nameGap: 28,
-      axisLabel: { ...AXIS.axisLabel, rotate: appearance.axisLabelRotation ?? 0 },
+      axisLabel: {
+        ...AXIS.axisLabel,
+        rotate: appearance.axisLabelRotation ?? 0,
+        formatter: (value: string) => compactWorkWeekLabel(value),
+      },
     },
     yAxis: {
       type: 'value',
@@ -99,7 +166,7 @@ function lineSeries(name: string, values: number[], appearance: ChartAppearance,
     lineStyle: { width: 2.4 },
     itemStyle: { borderColor: '#FDFEFF', borderWidth: 2 },
     areaStyle: area ? { opacity: 0.1 } : undefined,
-    label: {
+          label: {
       show: appearance.showLabels ?? true,
       position: 'top',
       color: '#45505F',
@@ -154,7 +221,11 @@ export function buildChartOption(
           color: '#45505F',
           fontSize: 10,
         },
-        data: points.map((point) => ({ name: point.category, value: point.value })),
+        data: points.map((point) => ({
+          name: compactWorkWeekLabel(point.category),
+          value: point.value,
+          rawCategory: point.category,
+        })),
       }],
     }
   }
@@ -335,7 +406,11 @@ export function buildChartOption(
         data: xValues,
         ...AXIS,
         name: appearance.xAxisTitle,
-        axisLabel: { ...AXIS.axisLabel, rotate: appearance.axisLabelRotation ?? 0 },
+      axisLabel: {
+        ...AXIS.axisLabel,
+        rotate: appearance.axisLabelRotation ?? 0,
+        formatter: (value: string) => compactWorkWeekLabel(value),
+      },
       },
       yAxis: { type: 'category', data: yValues, ...AXIS, name: appearance.yAxisTitle },
       visualMap: {
@@ -369,10 +444,25 @@ export function buildChartOption(
 
   const base = cartesianBase(appearance)
   const isHorizontal = type === 'bar' || type === 'stackedBar'
+  const secondarySeriesName = appearance.secondarySeriesName ?? 'Secondary'
+  const primaryPoints = type === 'combo'
+    ? points.filter((point) => (point.series || 'Value') !== secondarySeriesName)
+    : points
+  const primaryAxisValues = type === 'stackedBar'
+    ? categories.map((category) => primaryPoints
+      .filter((point) => point.category === category)
+      .reduce((total, point) => total + point.value, 0))
+    : primaryPoints.map((point) => point.value)
+  const primaryAxisBounds = referenceAxisBounds(primaryAxisValues, appearance)
   const series = [...groups.entries()].map(([name, items], index): SeriesOption => {
     const values = valuesFor(items)
-    if (type === 'line' || type === 'area') return lineSeries(name, values, appearance, type === 'area')
-    if (type === 'combo' && index === groups.size - 1) {
+    if (type === 'line' || type === 'area') {
+      return {
+        ...lineSeries(name, values, appearance, type === 'area'),
+        markLine: index === 0 ? referenceMarkLine(appearance, false) : undefined,
+      } as SeriesOption
+    }
+    if (type === 'combo' && name === secondarySeriesName) {
       return {
         ...lineSeries(name, values, appearance),
         yAxisIndex: 1,
@@ -397,8 +487,10 @@ export function buildChartOption(
         ),
       },
       labelLayout: { hideOverlap: true },
+      markLine: index === 0 ? referenceMarkLine(appearance, isHorizontal) : undefined,
     }
   })
+  const hasCategoryZoom = categories.length > 30
 
   return {
     ...base,
@@ -409,6 +501,7 @@ export function buildChartOption(
           name: appearance.yAxisTitle,
           nameLocation: 'middle',
           nameGap: 28,
+          ...primaryAxisBounds,
           splitLine: { show: appearance.showGrid ?? true, lineStyle: { color: '#EBEEF3' } },
         }
       : {
@@ -418,7 +511,11 @@ export function buildChartOption(
           name: appearance.xAxisTitle,
           nameLocation: 'middle',
           nameGap: 28,
-          axisLabel: { ...AXIS.axisLabel, rotate: appearance.axisLabelRotation ?? 0 },
+      axisLabel: {
+        ...AXIS.axisLabel,
+        rotate: appearance.axisLabelRotation ?? 0,
+        formatter: (value: string) => compactWorkWeekLabel(value),
+      },
         },
     yAxis: type === 'combo'
       ? [
@@ -428,9 +525,17 @@ export function buildChartOption(
             name: appearance.yAxisTitle,
             nameLocation: 'middle',
             nameGap: 38,
+            ...primaryAxisBounds,
             splitLine: { show: appearance.showGrid ?? true, lineStyle: { color: '#EBEEF3' } },
           },
-          { type: 'value', ...AXIS, splitLine: { show: false } },
+          {
+            type: 'value',
+            ...AXIS,
+            name: appearance.secondaryYAxisTitle,
+            nameLocation: 'middle',
+            nameGap: 38,
+            splitLine: { show: false },
+          },
         ]
       : isHorizontal
         ? {
@@ -438,7 +543,11 @@ export function buildChartOption(
             data: categories,
             ...AXIS,
             name: appearance.xAxisTitle,
-            axisLabel: { ...AXIS.axisLabel, rotate: appearance.axisLabelRotation ?? 0 },
+            axisLabel: {
+              ...AXIS.axisLabel,
+              rotate: appearance.axisLabelRotation ?? 0,
+              formatter: (value: string) => compactWorkWeekLabel(value),
+            },
           }
         : {
             type: 'value',
@@ -446,8 +555,41 @@ export function buildChartOption(
             name: appearance.yAxisTitle,
             nameLocation: 'middle',
             nameGap: 38,
+            ...primaryAxisBounds,
             splitLine: { show: appearance.showGrid ?? true, lineStyle: { color: '#EBEEF3' } },
           },
+    legend: {
+      ...(base.legend as object),
+      type: 'scroll',
+      show: (appearance.showLegend ?? true) && groups.size > 1,
+    },
+    grid: {
+      ...(base.grid as object),
+      bottom: hasCategoryZoom ? 58 : 34,
+    },
+    dataZoom: hasCategoryZoom
+      ? [
+          {
+            type: 'inside',
+            startValue: Math.max(0, categories.length - 30),
+            endValue: categories.length - 1,
+            filterMode: 'none',
+          },
+          {
+            type: 'slider',
+            startValue: Math.max(0, categories.length - 30),
+            endValue: categories.length - 1,
+            filterMode: 'none',
+            height: 14,
+            bottom: 8,
+            borderColor: '#dce3ec',
+            backgroundColor: '#f7f9fc',
+            fillerColor: 'rgba(46, 90, 172, 0.16)',
+            showDetail: false,
+            showDataShadow: false,
+          },
+        ]
+      : undefined,
     series,
   }
 }

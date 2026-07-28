@@ -16,6 +16,14 @@ export {
   profileSpreadsheetInputs,
   profileWorkbook,
 } from './profiler'
+export {
+  applySourceRepairs,
+  emptySourceRepairs,
+  findSourceFieldRepair,
+  inspectSourceHealth,
+  type SourceHealthIssue,
+  type SourceHealthSummary,
+} from './repair'
 export { rebindDashboardSources } from './rebind'
 export {
   SpreadsheetProfileError,

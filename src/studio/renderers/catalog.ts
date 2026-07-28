@@ -1,5 +1,6 @@
 export type StudioVisualType =
   | 'kpi'
+  | 'splitKpi'
   | 'table'
   | 'bar'
   | 'column'
@@ -32,6 +33,7 @@ export interface VisualCatalogItem {
 
 export const VISUAL_CATALOG: VisualCatalogItem[] = [
   { type: 'kpi', name: 'Metric', description: 'One value with optional comparison', family: 'Essentials', minimumSize: { w: 2, h: 2 }, accepts: { dimensions: 0, measures: 1 } },
+  { type: 'splitKpi', name: 'Split metric', description: 'Two related values in one compact card', family: 'Essentials', minimumSize: { w: 4, h: 2 }, accepts: { dimensions: 0, measures: 2 } },
   { type: 'table', name: 'Table', description: 'Detailed rows and selected columns', family: 'Essentials', minimumSize: { w: 4, h: 3 }, accepts: { dimensions: 1, measures: 1 } },
   { type: 'column', name: 'Column', description: 'Compare categories vertically', family: 'Comparison', minimumSize: { w: 4, h: 3 }, accepts: { dimensions: 1, measures: 2 } },
   { type: 'bar', name: 'Bar', description: 'Compare categories with long labels', family: 'Comparison', minimumSize: { w: 4, h: 3 }, accepts: { dimensions: 1, measures: 2 } },

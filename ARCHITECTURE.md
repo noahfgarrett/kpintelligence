@@ -19,10 +19,10 @@ Library shell
 Three persistence concerns stay separate:
 
 1. **Library document:** folders, projects, dashboard definitions, themes, layouts, and export profiles.
-2. **Private host state:** absolute source paths, recent locations, local permissions, and user filter state. This remains in the application data under the local operating-system user profile.
+2. **Private host state:** absolute source paths, recent locations, local permissions, source repairs, and library backups. This remains in the application data under the local operating-system user profile.
 3. **Disposable runtime cache:** source snapshots, inferred schemas, query results, and diagnostics.
 
-Raw spreadsheet rows are never written into the library document. Portable dashboard or workspace packages are future work and must exclude absolute paths and raw spreadsheet rows.
+Raw spreadsheet rows are never written into the library document. Portable `.kpidashboard` packages contain dashboard definitions, export settings, semantic source requirements, and integrity metadata while excluding absolute paths, credentials, and source rows. Team Libraries scan only user-approved local folders and install packages as independent dashboard copies.
 
 ## Library Hierarchy
 
@@ -47,6 +47,8 @@ sentence controls
 
 Operators are type-aware. Ambiguous multi-row lookups require an explicit first, last, list, count, aggregate, or error policy. Every execution reports matched and excluded rows.
 
+Reusable calculation recipes persist typed aggregation and predicate configuration rather than executable code. Runtime slicers compile to the same predicate model, and preview cross-filters are transient page-scoped conditions. Export captures a frozen dashboard snapshot so an in-progress interaction cannot change a report halfway through rendering.
+
 ## Source Refresh
 
 1. Recursively catalog supported ZIP, XLS, XLSX, and CSV files.
@@ -54,8 +56,9 @@ Operators are type-aware. Ambiguous multi-row lookups require an explicit first,
 3. Require stable file fingerprints before reading.
 4. Resolve each logical source binding independently.
 5. Parse typed values and infer fields with confidence and samples.
-6. Publish a new consistency-group snapshot only after every required source succeeds.
-7. Keep the previous snapshot on any error.
+6. Apply user-approved semantic field repairs and rebind saved field roles by stable identity, key, header, and source position.
+7. Publish a new consistency-group snapshot only after every required source succeeds.
+8. Keep the previous snapshot on any error.
 
 The OAC template uses a four-source consistency group. Custom dashboards may use one or more independent sources.
 
@@ -67,7 +70,7 @@ KPIntelligence owns a safe visual schema and translates it through a renderer re
 - React renderers own KPI, table, text, image, and filter widgets.
 - React Grid Layout owns collision-aware drag, resize, and serialized positions.
 
-Raw ECharts options are never persisted. Screen and export paths consume one resolved page model to reduce visual drift.
+Raw ECharts options are never persisted. Screen and export paths consume one resolved page model to reduce visual drift. Export preflight resolves every dataset and field, executes each query, checks non-finite results and coercion diagnostics, and computes paginated output before capture begins.
 
 ## Platform Boundary
 
@@ -77,7 +80,7 @@ The Tauri identifier and updater key stay stable through the QCx-to-KPIntelligen
 
 ## Migrations
 
-Migrations are sequential and transactional. Unknown future documents open read-only. The legacy QCx workspace migrator creates:
+Library documents are validated before use. A migration writes the previous valid document to a rollback key before replacing it, while malformed or future-schema documents are left untouched and surface a compatibility error. The legacy QCx workspace migrator creates:
 
 - A root project using the saved name and source-folder binding.
 - An OAC Weekly QA/QC dashboard instance.

@@ -24,18 +24,19 @@ The OAC Weekly QA/QC report is a featured production template, not a special app
 
 ## Dashboard Studio
 
-The custom studio is a beta foundation in v0.2.0. It currently provides:
+The v0.3.0 studio currently provides:
 
-- Spreadsheet and worksheet catalog with inferred field types and sample values.
-- Click-to-add and drag-to-add visual workflows.
-- Sentence-shaped filters, grouping, aggregation, running totals, and percent-of-total transforms.
+- Spreadsheet and worksheet catalog with samples, inferred types, health findings, and persistent name or type repairs.
+- Spreadsheet preview, quick chart suggestions, click-to-add and drag-to-add visuals, and direct field-role wells.
+- Sentence-shaped filters, grouping, aggregation, running totals, percent-of-total transforms, ratios, differences, and reusable calculation recipes.
 - KPI, table, bar, stacked bar, line, area, combo, donut, scatter, radar, gauge, funnel, heatmap, treemap, and progress visuals.
 - A 12-column drag-and-resize canvas with alignment, duplication, locking, undo, and autosave.
-- Single-value global filters matched across datasets by column name.
+- Searchable multi-select include or exclude slicers with dashboard or page scope and preview cross-filtering.
 - Multi-page desktop layouts with export-safe page rendering.
-- Readable calculation sentences, matched-row preview, source freshness, row drill-through, and semantic source rebinding after file moves or renames.
+- Portable dashboard packages, user-approved Team Library folders, package integrity validation, and privacy disclosure.
+- Readable calculation sentences, matched-row preview, source freshness, row drill-through, export preflight, and semantic source rebinding after file moves or renames.
 
-Guarded joins, reusable calculated fields, date bucketing, prior-period comparisons, explicit filter scope, and full parity with the hand-tuned OAC template remain roadmap work.
+Guarded joins, live linked calculated fields, general date bucketing, richer prior-period comparisons, organization governance, and full parity with every hand-tuned OAC visual remain roadmap work.
 
 ## Export
 
@@ -46,6 +47,8 @@ Export is modeled with the dashboard rather than added afterward. Named export p
 - Header, footer, and safe-zone margins.
 - Table pagination and repeated headers.
 - High-resolution rendering quality.
+- Frozen runtime slicer and chart-selection state.
+- Preflight blockers and warnings that navigate back to the affected visual.
 
 PowerPoint exports currently preserve charts as scalable SVG overlays on high-resolution page backgrounds. Fully editable native PowerPoint text, tables, and shapes remain roadmap work.
 
@@ -73,6 +76,6 @@ PowerPoint exports currently preserve charts as scalable SVG overlays on high-re
 
 1. KPIntelligence identity, library hierarchy, and OAC featured template.
 2. Generic spreadsheet profiler, safe rule engine, and custom dashboard studio.
-3. Semantic mappings, reusable rules, presentation layouts, and export profiles.
-4. Guarded joins, calculated fields, organization templates, and scheduled distribution.
+3. Intake repair, reusable calculations, scoped slicers, portable dashboard packages, Team Libraries, and export preflight.
+4. Guarded joins, live calculated fields, organization templates, and scheduled distribution.
 5. Electron host adapter for Noah Garrett's all-in-one PDF application.

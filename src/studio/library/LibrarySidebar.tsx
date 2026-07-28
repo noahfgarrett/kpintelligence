@@ -3,12 +3,15 @@ import {
   Bell,
   ChevronDown,
   ChevronRight,
+  Cloud,
   Copy,
   FileBarChart,
+  FileInput,
   Folder,
   FolderInput,
   FolderOpen,
   FolderPlus,
+  FolderSync,
   Home,
   MoreHorizontal,
   Pencil,
@@ -17,6 +20,7 @@ import {
   Sparkles,
   Star,
   Trash2,
+  RefreshCw,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import type {
@@ -36,6 +40,10 @@ interface LibrarySidebarProps {
   onCreateFolder: (parentId: string | null) => void
   onCreateProject: (folderId: string | null) => void
   onCreateDashboard: (projectId: string) => void
+  onAddTeamLibrary: () => void
+  onImportPackage: () => void
+  onRefreshTeamLibrary: (id: string) => void
+  onRemoveTeamLibrary: (id: string) => void
   onRename: (kind: TreeItemKind, id: string, name: string) => void
   onDelete: (kind: TreeItemKind, id: string) => void
   onDuplicateDashboard: (id: string) => void
@@ -84,6 +92,10 @@ export default function LibrarySidebar({
   onCreateFolder,
   onCreateProject,
   onCreateDashboard,
+  onAddTeamLibrary,
+  onImportPackage,
+  onRefreshTeamLibrary,
+  onRemoveTeamLibrary,
   onRename,
   onDelete,
   onDuplicateDashboard,
@@ -415,7 +427,15 @@ export default function LibrarySidebar({
   const favoriteDashboards = store.dashboards.filter((dashboard) => dashboard.favorite)
 
   return (
-    <aside className="library-sidebar" onClick={() => setMenuKey(null)}>
+    <aside
+      className="library-sidebar"
+      onClick={() => setMenuKey(null)}
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape') return
+        setMenuKey(null)
+        setNewMenuOpen(false)
+      }}
+    >
       <div className="library-brand">
         <span className="library-brand-mark"><BarChart3 size={21} /></span>
         <div>
@@ -429,19 +449,30 @@ export default function LibrarySidebar({
       </div>
 
       <div className="library-create">
-        <button type="button" onClick={() => setNewMenuOpen((open) => !open)}>
+        <button
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={newMenuOpen}
+          onClick={() => setNewMenuOpen((open) => !open)}
+        >
           <Plus size={16} /> New <ChevronDown size={14} />
         </button>
         {newMenuOpen && (
-          <div className="library-new-menu">
-            <button type="button" onClick={() => { onCreateDashboard(store.projects[0]?.id ?? ''); setNewMenuOpen(false) }}>
+          <div className="library-new-menu" role="menu">
+            <button role="menuitem" type="button" onClick={() => { onCreateDashboard(store.projects[0]?.id ?? ''); setNewMenuOpen(false) }}>
               <FileBarChart size={16} /><span><strong>Dashboard</strong><small>Build a custom report</small></span>
             </button>
-            <button type="button" onClick={() => { onCreateProject(null); setNewMenuOpen(false) }}>
+            <button role="menuitem" type="button" onClick={() => { onCreateProject(null); setNewMenuOpen(false) }}>
               <BarChart3 size={16} /><span><strong>Project</strong><small>Group dashboards and data</small></span>
             </button>
-            <button type="button" onClick={() => { onCreateFolder(null); setNewMenuOpen(false) }}>
+            <button role="menuitem" type="button" onClick={() => { onCreateFolder(null); setNewMenuOpen(false) }}>
               <FolderPlus size={16} /><span><strong>Folder</strong><small>Organize projects</small></span>
+            </button>
+            <button role="menuitem" type="button" onClick={() => { onImportPackage(); setNewMenuOpen(false) }}>
+              <FileInput size={16} /><span><strong>Import package</strong><small>Add a shared .kpidashboard</small></span>
+            </button>
+            <button role="menuitem" type="button" onClick={() => { onAddTeamLibrary(); setNewMenuOpen(false) }}>
+              <FolderSync size={16} /><span><strong>Team Library</strong><small>Watch a shared synced folder</small></span>
             </button>
           </div>
         )}
@@ -475,6 +506,61 @@ export default function LibrarySidebar({
                 <span>{dashboard.name}</span>
               </button>
             ))}
+          </section>
+        )}
+
+        {!query && (
+          <section className="library-section team-libraries">
+            <div className="library-section-heading">
+              <h2>Team Libraries</h2>
+              <button type="button" onClick={onAddTeamLibrary} aria-label="Add Team Library" title="Add Team Library">
+                <FolderSync size={14} />
+              </button>
+            </div>
+            {store.teamLibraries.map((library) => {
+              const active = store.selection.kind === 'teamLibrary' && store.selection.id === library.id
+              const key = `teamLibrary:${library.id}`
+              return (
+                <div className="library-team-row-wrap" key={library.id}>
+                  <button
+                    type="button"
+                    className={`library-team-row ${active ? 'active' : ''}`}
+                    onClick={() => onSelect({ kind: 'teamLibrary', id: library.id })}
+                  >
+                    <Cloud size={15} />
+                    <span><strong>{library.name}</strong><small>{library.packageCount} package{library.packageCount === 1 ? '' : 's'}</small></span>
+                  </button>
+                  <button
+                    type="button"
+                    className="tree-more"
+                    aria-label={`Options for ${library.name}`}
+                    aria-haspopup="menu"
+                    aria-expanded={menuKey === key}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      setMenuKey((value) => value === key ? null : key)
+                    }}
+                  >
+                    <MoreHorizontal size={14} />
+                  </button>
+                  {menuKey === key && (
+                    <div className="library-context-menu team-library-menu" role="menu" onClick={(event) => event.stopPropagation()}>
+                      <button role="menuitem" type="button" onClick={() => { onRefreshTeamLibrary(library.id); setMenuKey(null) }}>
+                        <RefreshCw size={14} /> Refresh
+                      </button>
+                      <button role="menuitem" className="danger" type="button" onClick={() => { onRemoveTeamLibrary(library.id); setMenuKey(null) }}>
+                        <Trash2 size={14} /> Remove
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+            {store.teamLibraries.length === 0 && (
+              <button className="library-add-team" type="button" onClick={onAddTeamLibrary}>
+                <FolderSync size={14} /> Add shared folder
+              </button>
+            )}
           </section>
         )}
 

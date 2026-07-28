@@ -7,6 +7,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.3.0',
+    date: '2026-07-28T02:30:00Z',
+    type: 'major',
+    notes: [
+      'Added an Intake and Repair Center for reviewing worksheet health, correcting column names and types, and preserving those repairs when synced folders move',
+      'Added spreadsheet previews, field sampling, quick chart suggestions, and direct drag-or-click role assignment for category, value, series, secondary axis, and table columns',
+      'Added multi-select include and exclude slicers with dashboard or page scope, searchable values, one-click reset, and interactive chart cross-filtering',
+      'Added reusable calculation recipes for row rules, split metrics, ratios, differences, running totals, percent of total, formats, and relative work-week logic',
+      'Added portable .kpidashboard packages and Team Libraries so dashboards can be shared without spreadsheet rows, credentials, or absolute source paths',
+      'Added semantic source matching and rebinding for visuals, calculations, and slicers when spreadsheet files, folders, worksheets, or field identifiers change',
+      'Added export preflight with navigable blockers, data-quality warnings, frozen slicer state, table pagination, and high-fidelity PDF, PowerPoint, and PNG output',
+      'Added local library backup and restore, stricter document validation, package integrity checks, and safer migration behavior across application updates',
+      'Improved studio accessibility, source-switching safety, compact chart labels, responsive slicer layouts, modal keyboard behavior, and empty-state guidance',
+      'Rebuilt the cross-platform release pipeline to verify, assemble, checksum, and publish updater assets atomically only after every platform succeeds',
+    ],
+  },
+  {
     version: '0.2.0',
     date: '2026-07-25T20:45:00Z',
     type: 'major',
