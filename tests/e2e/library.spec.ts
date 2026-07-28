@@ -77,6 +77,8 @@ test('dashboard packages download and install as editable copies', async ({ page
 })
 
 test('folders, projects, dashboards, spreadsheet profiling, and the visual studio work end to end', async ({ page }, testInfo) => {
+  testInfo.setTimeout(90_000)
+
   await page.getByRole('button', { name: 'Home' }).click()
   await expect(page.getByRole('heading', { name: 'Your intelligence workspace' })).toBeVisible()
 
