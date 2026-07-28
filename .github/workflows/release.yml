@@ -81,15 +81,22 @@ jobs:
           repo="noahfgarrett/kpintelligence-releases"
           release_body="$(printf 'See the in-app changelog for release details.\n\nSource revision: %s\nWorkflow run: https://github.com/%s/actions/runs/%s' "${GITHUB_SHA}" "${GITHUB_REPOSITORY}" "${GITHUB_RUN_ID}")"
           release_id=""
-          if existing_release_id="$(gh api "repos/${repo}/releases/tags/${RELEASE_TAG}" --jq '.id' 2>/dev/null)"; then
-            release_id="${existing_release_id}"
-          fi
-          if [[ -n "${release_id}" ]]; then
-            is_draft="$(gh api "repos/${repo}/releases/${release_id}" --jq '.draft')"
-            if [[ "${is_draft}" != "true" ]]; then
+          while IFS=$'\t' read -r candidate_id candidate_draft; do
+            [[ -z "${candidate_id}" ]] && continue
+            if [[ "${candidate_draft}" != "true" ]]; then
               echo "${RELEASE_TAG} is already published."
               exit 1
             fi
+            if [[ -z "${release_id}" ]]; then
+              release_id="${candidate_id}"
+            else
+              gh api --method DELETE "repos/${repo}/releases/${candidate_id}"
+            fi
+          done < <(
+            gh api --paginate "repos/${repo}/releases?per_page=100" \
+              --jq '.[] | select(.tag_name == env.RELEASE_TAG) | [.id, .draft] | @tsv'
+          )
+          if [[ -n "${release_id}" ]]; then
             while read -r asset_id; do
               [[ -z "${asset_id}" ]] || gh api --method DELETE "repos/${repo}/releases/assets/${asset_id}"
             done < <(gh api --paginate "repos/${repo}/releases/${release_id}/assets" --jq '.[].id')
@@ -193,28 +200,47 @@ jobs:
               exit 1
             fi
           done
-          gh release download "${RELEASE_TAG}" \
-            --repo "${repo}" \
-            --pattern latest.json \
-            --dir release-metadata
+          mkdir -p release-assets
+          while IFS=$'\t' read -r asset_id asset_name; do
+            gh api \
+              -H "Accept: application/octet-stream" \
+              "repos/${repo}/releases/assets/${asset_id}" \
+              > "release-assets/${asset_name}"
+          done < <(
+            gh api --paginate "repos/${repo}/releases/${RELEASE_ID}/assets" \
+              --jq '.[] | [.id, .name] | @tsv'
+          )
           jq -e \
             --arg version "${RELEASE_VERSION}" \
             '.version == $version
               and (.platforms["darwin-aarch64"].signature | length > 0)
               and (.platforms["darwin-x86_64"].signature | length > 0)
               and (.platforms["windows-x86_64-nsis"].signature | length > 0)' \
-            release-metadata/latest.json >/dev/null
-          gh release download "${RELEASE_TAG}" \
-            --repo "${repo}" \
-            --dir release-assets
+            release-assets/latest.json >/dev/null
           (
             cd release-assets
-            sha256sum * > SHA256SUMS.txt
+            for asset in "${expected[@]}"; do
+              sha256sum "${asset}"
+            done > SHA256SUMS.txt
           )
-          gh release upload "${RELEASE_TAG}" \
-            release-assets/SHA256SUMS.txt \
-            --repo "${repo}" \
-            --clobber
+          upload_response="$(curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "Accept: application/vnd.github+json" \
+            --header "Content-Type: application/octet-stream" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --data-binary "@release-assets/SHA256SUMS.txt" \
+            "https://uploads.github.com/repos/${repo}/releases/${RELEASE_ID}/assets?name=SHA256SUMS.txt")"
+          if [[ "$(jq -r '.name' <<< "${upload_response}")" != "SHA256SUMS.txt" ]]; then
+            echo "Checksum upload did not return the expected asset."
+            exit 1
+          fi
+          final_assets="$(gh api --paginate "repos/${repo}/releases/${RELEASE_ID}/assets" --jq '.[].name')"
+          if [[ "$(wc -l <<< "${final_assets}" | tr -d ' ')" -ne "$((${#expected[@]} + 1))" ]] ||
+            ! grep -Fxq "SHA256SUMS.txt" <<< "${final_assets}"; then
+            echo "Release checksum asset was not attached to the target release."
+            exit 1
+          fi
       - name: Publish verified release
         env:
           GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
