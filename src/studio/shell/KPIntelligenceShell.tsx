@@ -29,7 +29,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import App, { UpdateModal, type DashboardAutoImport } from '@/App'
 import { useModalFocus } from '@/hooks/useModalFocus'
 import { platform } from '@/platform'
-import { checkForUpdate } from '@/services/updateChecker'
+import { checkForUpdate, formatUpdateCheckError } from '@/services/updateChecker'
 import type { ReportFilters, UpdateInfo } from '@/types'
 import { isUsableSourceFile, loadWorkspaceSource } from '@/workspaces/source'
 import type { WorkspaceSourceSnapshot } from '@/workspaces/types'
@@ -949,8 +949,9 @@ export default function KPIntelligenceShell() {
       setUpdateInfo(info)
       setLastUpdateCheck(new Date())
       if (info && promptIfAvailable) setUpdateOpen(true)
-    } catch {
-      setUpdateCheckError('Check your network or proxy, then try again.')
+    } catch (error) {
+      console.error('Update check failed', error)
+      setUpdateCheckError(formatUpdateCheckError(error))
     } finally {
       updateCheckInFlightRef.current = false
       setUpdateChecking(false)

@@ -35,7 +35,7 @@ import { exportReportDeck } from '@/export/pptx'
 import { exportSlidesPdf } from '@/export/pdf'
 import { expandImportFiles, filesFromDrop, importSpreadsheet } from '@/services/fileImport'
 import { clearLegacyConnectionData, loadFilters, saveFilters } from '@/services/storage'
-import { checkForUpdate } from '@/services/updateChecker'
+import { checkForUpdate, formatUpdateCheckError } from '@/services/updateChecker'
 import { installUpdate } from '@/services/updateDownload'
 import { platform } from '@/platform'
 import { useModalFocus } from '@/hooks/useModalFocus'
@@ -1415,8 +1415,9 @@ export default function App({
           setUpdateDefaultTab('update')
           setUpdateOpen(true)
         }
-      } catch {
-        if (active) setUpdateCheckError('Check your network or proxy, then try again.')
+      } catch (error) {
+        console.error('Update check failed', error)
+        if (active) setUpdateCheckError(formatUpdateCheckError(error))
       }
     }
     void poll()
@@ -1444,8 +1445,9 @@ export default function App({
         dismissedUpdateVersionRef.current = null
         setUpdateDefaultTab('update')
       }
-    } catch {
-      setUpdateCheckError('Check your network or proxy, then try again.')
+    } catch (error) {
+      console.error('Update check failed', error)
+      setUpdateCheckError(formatUpdateCheckError(error))
     } finally {
       setUpdateChecking(false)
     }

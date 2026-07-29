@@ -151,7 +151,7 @@ export const tauriPlatform: PlatformBridge = {
   openExternalUrl: openUrl,
   async checkForUpdate(): Promise<DesktopUpdateInfo | null> {
     if (pendingUpdate) await pendingUpdate.close()
-    pendingUpdate = await check({ timeout: 12_000 })
+    pendingUpdate = await check({ timeout: 30_000 })
     if (!pendingUpdate) return null
     return {
       version: pendingUpdate.version,
@@ -161,7 +161,7 @@ export const tauriPlatform: PlatformBridge = {
   },
   async installUpdate(info, onProgress): Promise<void> {
     if (!pendingUpdate || pendingUpdate.version !== info.version) {
-      pendingUpdate = await check({ timeout: 12_000 })
+      pendingUpdate = await check({ timeout: 30_000 })
     }
     if (!pendingUpdate || pendingUpdate.version !== info.version) {
       throw new Error('The selected update is no longer available.')

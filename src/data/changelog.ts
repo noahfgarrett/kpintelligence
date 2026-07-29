@@ -7,6 +7,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.3.3',
+    date: '2026-07-29T17:40:03Z',
+    type: 'fix',
+    notes: [
+      'Made desktop update checks honor Windows and macOS system proxy settings plus standard proxy environment variables',
+      'Changed updater HTTPS handling to use the operating system certificate store for corporate network compatibility',
+      'Extended update checks to 30 seconds for slower VPN and proxy connections',
+      'Added specific guidance for proxy, certificate inspection, DNS, timeout, blocked request, and service failures',
+      'Added regression coverage for update connection diagnostics',
+    ],
+  },
+  {
     version: '0.3.2',
     date: '2026-07-29T13:51:00Z',
     type: 'fix',
