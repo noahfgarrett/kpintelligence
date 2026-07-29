@@ -51,6 +51,9 @@ export const browserPlatform: PlatformBridge = {
     window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
     return defaultName
   },
+  async openExternalUrl(url: string): Promise<void> {
+    window.open(url, '_blank', 'noopener,noreferrer')
+  },
   async checkForUpdate(): Promise<DesktopUpdateInfo | null> {
     return null
   },

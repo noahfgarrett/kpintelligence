@@ -76,6 +76,7 @@ export function createEmptyLibrary(): LibraryStore {
     description: 'Featured quality reporting workspace.',
     folderId: null,
     sourceFolder: null,
+    sourceWebUrl: null,
     sourceFileCount: 0,
     sourceDatasetCount: 0,
     sourceRefreshedAt: null,
@@ -113,6 +114,7 @@ function migrateWorkspaceStore(workspaces: WorkspaceStoreData): LibraryStore {
       description: 'Migrated weekly QA/QC workspace.',
       folderId: null,
       sourceFolder: workspace.sourceFolder,
+      sourceWebUrl: null,
       sourceFileCount: 0,
       sourceDatasetCount: 0,
       sourceRefreshedAt: null,
@@ -526,6 +528,7 @@ function validLibrary(value: unknown): boolean {
       || !isString(project.description)
       || !isNullableString(project.folderId)
       || !isNullableString(project.sourceFolder)
+      || (project.sourceWebUrl !== undefined && !isNullableString(project.sourceWebUrl))
       || !isFiniteNumber(project.sourceFileCount)
       || !isFiniteNumber(project.sourceDatasetCount)
       || !isNullableString(project.sourceRefreshedAt)

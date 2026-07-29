@@ -7,6 +7,19 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.3.1',
+    date: '2026-07-29T13:01:02Z',
+    type: 'fix',
+    notes: [
+      'Made New project a primary action on Home and added a dedicated project shortcut to the library sidebar',
+      'Stopped global dashboard creation from silently defaulting to OAC Weekly Reporting when more than one project is available',
+      'Added a project-first setup flow that can connect Microsoft 365 data immediately after the project is created',
+      'Added a Teams and SharePoint connection center with recent synced locations, native folder picking, and saved web shortcuts',
+      'Added restricted external-link permissions so only HTTPS SharePoint and Microsoft Teams locations can be opened from the app',
+      'Improved project data status, connection controls, source refresh behavior, and regression coverage for multi-project workflows',
+    ],
+  },
+  {
     version: '0.3.0',
     date: '2026-07-28T02:30:00Z',
     type: 'major',

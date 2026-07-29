@@ -1,6 +1,7 @@
 import { join } from '@tauri-apps/api/path'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { readDir, readFile, remove, rename, stat, watch, writeFile } from '@tauri-apps/plugin-fs'
+import { openUrl } from '@tauri-apps/plugin-opener'
 import { relaunch } from '@tauri-apps/plugin-process'
 import { load, type Store } from '@tauri-apps/plugin-store'
 import { check, type Update } from '@tauri-apps/plugin-updater'
@@ -104,6 +105,7 @@ export const tauriPlatform: PlatformBridge = {
   async chooseDirectory(options): Promise<string | null> {
     const selected = await open({
       title: options?.title ?? 'Choose a synced SharePoint or OneDrive folder',
+      defaultPath: options?.defaultPath,
       directory: true,
       recursive: true,
       multiple: false,
@@ -146,6 +148,7 @@ export const tauriPlatform: PlatformBridge = {
     }
     return destination
   },
+  openExternalUrl: openUrl,
   async checkForUpdate(): Promise<DesktopUpdateInfo | null> {
     if (pendingUpdate) await pendingUpdate.close()
     pendingUpdate = await check({ timeout: 12_000 })

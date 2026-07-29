@@ -40,6 +40,17 @@ describe('library persistence', () => {
     expect(memory.saves).toEqual([])
   })
 
+  it('persists an optional Microsoft 365 source shortcut with the project', async () => {
+    const current = createEmptyLibrary()
+    current.projects[0].sourceWebUrl = 'https://contoso.sharepoint.com/sites/QC'
+    const memory = memoryPlatform({ 'studio-library': current })
+
+    await saveLibrary(memory.platform, current)
+    const reopened = await loadLibrary(memory.platform)
+
+    expect(reopened.projects[0].sourceWebUrl).toBe('https://contoso.sharepoint.com/sites/QC')
+  })
+
   it('normalizes partial legacy filters while migrating QCx workspaces', async () => {
     const memory = memoryPlatform({
       workspaces: {

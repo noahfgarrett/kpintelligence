@@ -13,6 +13,20 @@
     "fs:allow-write-file",
     "fs:allow-rename",
     "fs:allow-remove",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        {
+          "url": "https://*.sharepoint.com/*"
+        },
+        {
+          "url": "https://teams.microsoft.com/*"
+        },
+        {
+          "url": "https://teams.cloud.microsoft/*"
+        }
+      ]
+    },
     "store:default",
     "updater:default",
     "process:allow-restart"

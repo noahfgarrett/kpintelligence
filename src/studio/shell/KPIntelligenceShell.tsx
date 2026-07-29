@@ -5,13 +5,17 @@ import {
   CalendarClock,
   CheckCircle2,
   ChevronRight,
+  Cloud,
   Database,
   Download,
+  ExternalLink,
   FileBarChart,
   FileSpreadsheet,
   Folder,
   FolderOpen,
+  FolderSync,
   LayoutDashboard,
+  Link2,
   MoreHorizontal,
   Plus,
   RefreshCw,
@@ -38,6 +42,7 @@ import {
   rebindDashboardSources,
   type SpreadsheetCatalogProfile,
 } from '../data'
+import { normalizeMicrosoft365Url } from '../data/microsoft365'
 import LibrarySidebar from '../library/LibrarySidebar'
 import {
   createId,
@@ -200,17 +205,25 @@ function dashboardIcon(dashboard: DashboardRecord) {
 function CreateModal({
   request,
   projects,
+  persistentFolders,
   onClose,
   onCreate,
 }: {
   request: CreateRequest | null
   projects: ProjectRecord[]
+  persistentFolders: boolean
   onClose: () => void
-  onCreate: (request: CreateRequest, name: string, dashboardKind?: DashboardRecord['kind']) => void
+  onCreate: (
+    request: CreateRequest,
+    name: string,
+    dashboardKind?: DashboardRecord['kind'],
+    connectDataAfterCreate?: boolean,
+  ) => void
 }) {
   const [name, setName] = useState('')
   const [dashboardKind, setDashboardKind] = useState<DashboardRecord['kind']>('custom')
   const [projectId, setProjectId] = useState('')
+  const [connectDataAfterCreate, setConnectDataAfterCreate] = useState(true)
   const dialogRef = useRef<HTMLDivElement>(null)
   useModalFocus(Boolean(request), dialogRef, onClose)
 
@@ -218,8 +231,11 @@ function CreateModal({
     if (!request) return
     setName(request.kind === 'folder' ? 'New folder' : request.kind === 'project' ? 'New project' : 'Untitled dashboard')
     setDashboardKind('custom')
-    setProjectId(request.kind === 'dashboard' ? request.projectId : '')
-  }, [request])
+    setProjectId(request.kind === 'dashboard'
+      ? request.projectId || (projects.length === 1 ? projects[0].id : '')
+      : '')
+    setConnectDataAfterCreate(persistentFolders)
+  }, [request, persistentFolders, projects])
 
   if (!request) return null
   const title = request.kind === 'folder'
@@ -253,7 +269,7 @@ function CreateModal({
             const resolved = request.kind === 'dashboard' && projectId
               ? { ...request, projectId }
               : request
-            onCreate(resolved, value, dashboardKind)
+            onCreate(resolved, value, dashboardKind, connectDataAfterCreate)
           }}
         >
           <label className="kp-field">
@@ -265,6 +281,7 @@ function CreateModal({
               <label className="kp-field">
                 <span>Project</span>
                 <select value={projectId} onChange={(event) => setProjectId(event.target.value)}>
+                  {!projectId && <option value="">Choose a project</option>}
                   {projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}
                 </select>
               </label>
@@ -290,6 +307,20 @@ function CreateModal({
               </div>
             </>
           )}
+          {request.kind === 'project' && persistentFolders && (
+            <label className="project-connect-option">
+              <input
+                type="checkbox"
+                checked={connectDataAfterCreate}
+                onChange={(event) => setConnectDataAfterCreate(event.target.checked)}
+              />
+              <span><Cloud size={18} /></span>
+              <div>
+                <strong>Connect Microsoft 365 data next</strong>
+                <small>Link a Teams, SharePoint, or OneDrive synced folder.</small>
+              </div>
+            </label>
+          )}
           <footer>
             <button className="kp-button secondary" type="button" onClick={onClose}>Cancel</button>
             <button className="kp-button primary" type="submit" disabled={!name.trim() || (request.kind === 'dashboard' && !projectId)}>
@@ -297,6 +328,143 @@ function CreateModal({
             </button>
           </footer>
         </form>
+      </div>
+    </div>
+  )
+}
+
+function SourceConnectionModal({
+  project,
+  recentFolders,
+  onClose,
+  onChooseFolder,
+  onSaveAndOpenUrl,
+}: {
+  project: ProjectRecord | null
+  recentFolders: string[]
+  onClose: () => void
+  onChooseFolder: (defaultPath?: string) => Promise<boolean>
+  onSaveAndOpenUrl: (url: string) => Promise<void>
+}) {
+  const [webUrl, setWebUrl] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useModalFocus(Boolean(project), dialogRef, onClose)
+
+  useEffect(() => {
+    if (!project) return
+    setWebUrl(project.sourceWebUrl ?? '')
+    setError(null)
+    setBusy(false)
+  }, [project])
+
+  if (!project) return null
+
+  async function chooseFolder(defaultPath?: string): Promise<void> {
+    setBusy(true)
+    setError(null)
+    try {
+      if (await onChooseFolder(defaultPath)) onClose()
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'The synced folder could not be opened.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function saveAndOpenUrl(): Promise<void> {
+    const normalized = normalizeMicrosoft365Url(webUrl)
+    if (!normalized) {
+      setError('Enter an HTTPS SharePoint or Microsoft Teams address.')
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      await onSaveAndOpenUrl(normalized)
+      setWebUrl(normalized)
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'The Microsoft 365 location could not be opened.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="kp-modal-backdrop source-connect-backdrop" role="presentation" onMouseDown={onClose}>
+      <div
+        ref={dialogRef}
+        className="kp-modal source-connect-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Connect data for ${project.name}`}
+        tabIndex={-1}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header>
+          <div>
+            <span>Microsoft 365 connection</span>
+            <h2>Connect {project.name}</h2>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close"><X size={17} /></button>
+        </header>
+        <div className="source-connect-body">
+          <section className="source-connect-primary">
+            <span className="source-connect-icon"><FolderSync size={22} /></span>
+            <div>
+              <span className="source-connect-label">Live project data</span>
+              <h3>Choose the synced folder</h3>
+              <p>KPIntelligence watches the local folder created by Teams, SharePoint, or OneDrive Sync.</p>
+            </div>
+            <button className="kp-button primary" type="button" disabled={busy} onClick={() => void chooseFolder(project.sourceFolder ?? undefined)}>
+              <FolderOpen size={16} /> {project.sourceFolder ? 'Change synced folder' : 'Choose synced folder'}
+            </button>
+          </section>
+
+          {recentFolders.length > 0 && (
+            <section className="source-connect-recents">
+              <span>Recent synced locations</span>
+              <div>
+                {recentFolders.map((folder) => (
+                  <button type="button" key={folder} disabled={busy} onClick={() => void chooseFolder(folder)}>
+                    <FolderOpen size={15} />
+                    <span><strong>{folderName(folder)}</strong><small>{folder}</small></span>
+                    <ChevronRight size={15} />
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
+          <section className="source-connect-web">
+            <div className="source-connect-web-heading">
+              <span><Link2 size={16} /></span>
+              <div>
+                <strong>SharePoint or Teams web shortcut</strong>
+                <small>Open the library, select Sync in Microsoft 365, then choose the synced folder above.</small>
+              </div>
+            </div>
+            <div className="source-connect-url-row">
+              <input
+                aria-label="SharePoint or Teams URL"
+                value={webUrl}
+                placeholder="https://company.sharepoint.com/sites/project"
+                onChange={(event) => {
+                  setWebUrl(event.target.value)
+                  setError(null)
+                }}
+              />
+              <button className="kp-button secondary" type="button" disabled={busy || !webUrl.trim()} onClick={() => void saveAndOpenUrl()}>
+                <ExternalLink size={15} /> Save and open
+              </button>
+            </div>
+          </section>
+          {error && <div className="source-connect-error" role="alert"><AlertTriangle size={15} /> {error}</div>}
+        </div>
+        <footer>
+          <button className="kp-button secondary" type="button" onClick={onClose}>Not now</button>
+        </footer>
       </div>
     </div>
   )
@@ -437,10 +605,12 @@ function ExportProfileModal({
 function HomeView({
   store,
   onOpen,
+  onCreateProject,
   onCreateDashboard,
 }: {
   store: LibraryStore
   onOpen: (dashboard: DashboardRecord) => void
+  onCreateProject: () => void
   onCreateDashboard: () => void
 }) {
   const recent = store.recentDashboardIds
@@ -455,7 +625,10 @@ function HomeView({
           <h1>Your intelligence workspace</h1>
           <p>Turn project spreadsheets into dashboards without formulas, helper sheets, or measure syntax.</p>
         </div>
-        <button className="kp-button primary" type="button" onClick={onCreateDashboard}><Plus size={16} /> New dashboard</button>
+        <div className="library-page-actions">
+          <button className="kp-button secondary" type="button" onClick={onCreateDashboard}><LayoutDashboard size={16} /> New dashboard</button>
+          <button className="kp-button primary" type="button" onClick={onCreateProject}><Plus size={16} /> New project</button>
+        </div>
       </header>
       <section className="home-summary">
         <div><span><Folder size={18} /></span><strong>{store.projects.length}</strong><small>Projects</small></div>
@@ -517,6 +690,7 @@ function ProjectView({
   onOpen,
   onCreateDashboard,
   onChooseSource,
+  onOpenWebSource,
   onRefresh,
 }: {
   project: ProjectRecord
@@ -526,6 +700,7 @@ function ProjectView({
   onOpen: (dashboard: DashboardRecord) => void
   onCreateDashboard: () => void
   onChooseSource: () => void
+  onOpenWebSource: () => void
   onRefresh: () => void
 }) {
   return (
@@ -541,7 +716,7 @@ function ProjectView({
       <section className={`project-source-band ${source.status}`}>
         <div className="project-source-icon"><FolderOpen size={21} /></div>
         <div>
-          <span>Project data</span>
+          <span>Microsoft 365 data</span>
           <strong>{folderName(project.sourceFolder)}</strong>
           <p>{source.message}</p>
         </div>
@@ -553,7 +728,12 @@ function ProjectView({
         <div className="project-source-actions">
           {persistentFolders && (
             <button className="kp-button secondary" type="button" onClick={onChooseSource}>
-              <FolderOpen size={15} /> {project.sourceFolder ? 'Change folder' : 'Choose folder'}
+              <FolderSync size={15} /> {project.sourceFolder ? 'Manage connection' : 'Connect data'}
+            </button>
+          )}
+          {project.sourceWebUrl && (
+            <button className="kp-icon-button" type="button" onClick={onOpenWebSource} aria-label="Open linked Microsoft 365 location" title="Open linked Microsoft 365 location">
+              <ExternalLink size={16} />
             </button>
           )}
           <button className="kp-icon-button" type="button" onClick={onRefresh} disabled={!project.sourceFolder || source.status === 'loading'} aria-label="Refresh project data">
@@ -599,6 +779,7 @@ export default function KPIntelligenceShell() {
     message: string
   }>({ status: 'saved', message: 'Saved locally' })
   const [createRequest, setCreateRequest] = useState<CreateRequest | null>(null)
+  const [sourceConnectionProjectId, setSourceConnectionProjectId] = useState<string | null>(null)
   const [sourceStates, setSourceStates] = useState<Record<string, SourceState>>({})
   const sourceStatesRef = useRef(sourceStates)
   sourceStatesRef.current = sourceStates
@@ -738,6 +919,22 @@ export default function KPIntelligenceShell() {
         catalog: null,
       }
     : null
+  const sourceConnectionProject = sourceConnectionProjectId
+    ? store.projects.find((project) => project.id === sourceConnectionProjectId) ?? null
+    : null
+  const recentSourceFolders = useMemo(() => {
+    const folders: string[] = []
+    for (const project of [...store.projects].reverse()) {
+      if (
+        !project.sourceFolder
+        || project.id === sourceConnectionProjectId
+        || folders.includes(project.sourceFolder)
+      ) continue
+      folders.push(project.sourceFolder)
+      if (folders.length === 4) break
+    }
+    return folders
+  }, [store.projects, sourceConnectionProjectId])
 
   const checkUpdates = useCallback(async (): Promise<void> => {
     if (updateChecking) return
@@ -1219,7 +1416,12 @@ export default function KPIntelligenceShell() {
     await refreshTeamLibrary(library)
   }
 
-  function createEntity(request: CreateRequest, name: string, dashboardKind: DashboardRecord['kind'] = 'custom'): void {
+  function createEntity(
+    request: CreateRequest,
+    name: string,
+    dashboardKind: DashboardRecord['kind'] = 'custom',
+    connectDataAfterCreate = false,
+  ): void {
     const createdAt = now()
     if (request.kind === 'folder') {
       const id = createId('folder')
@@ -1248,6 +1450,7 @@ export default function KPIntelligenceShell() {
           description: '',
           folderId: request.folderId,
           sourceFolder: null,
+          sourceWebUrl: null,
           sourceFileCount: 0,
           sourceDatasetCount: 0,
           sourceRefreshedAt: null,
@@ -1258,6 +1461,7 @@ export default function KPIntelligenceShell() {
         expandedProjectIds: [...current.expandedProjectIds, id],
         selection: { kind: 'project', id },
       }))
+      if (connectDataAfterCreate) setSourceConnectionProjectId(id)
     } else {
       const id = createId('dashboard')
       const page = dashboardKind === 'custom'
@@ -1536,9 +1740,21 @@ export default function KPIntelligenceShell() {
     })
   }
 
-  async function chooseSource(project: ProjectRecord): Promise<void> {
-    const folder = await platform.chooseDirectory()
-    if (!folder) return
+  async function chooseSource(project: ProjectRecord, defaultPath?: string): Promise<boolean> {
+    const preferredPath = defaultPath ?? project.sourceFolder ?? undefined
+    let folder: string | null
+    try {
+      folder = await platform.chooseDirectory({
+        title: `Connect synced data for ${project.name}`,
+        defaultPath: preferredPath,
+      })
+    } catch (error) {
+      if (!preferredPath) throw error
+      folder = await platform.chooseDirectory({
+        title: `Connect synced data for ${project.name}`,
+      })
+    }
+    if (!folder) return false
     const previousCatalog = sourceStatesRef.current[project.id]?.catalog ?? null
     sourceRefreshGeneration.current[project.id] = (sourceRefreshGeneration.current[project.id] ?? 0) + 1
     oacRefreshGeneration.current[project.id] = (oacRefreshGeneration.current[project.id] ?? 0) + 1
@@ -1564,11 +1780,38 @@ export default function KPIntelligenceShell() {
       ...current,
       projects: current.projects.map((candidate) => candidate.id === project.id ? updatedProject : candidate),
     }))
+    const includeOac = storeRef.current.dashboards.some((dashboard) =>
+      dashboard.projectId === project.id && dashboard.kind === 'oacWeekly')
     void refreshProject(
       updatedProject,
-      selectedDashboard?.kind === 'oacWeekly',
+      includeOac,
       previousCatalog,
     )
+    return true
+  }
+
+  async function saveAndOpenProjectWebUrl(projectId: string, url: string): Promise<void> {
+    const project = storeRef.current.projects.find((candidate) => candidate.id === projectId)
+    if (!project) throw new Error('The selected project is no longer available.')
+    if (!platform.openExternalUrl) {
+      throw new Error('Opening Microsoft 365 links requires the KPIntelligence desktop app.')
+    }
+    commitStore((current) => ({
+      ...current,
+      projects: current.projects.map((candidate) => candidate.id === projectId
+        ? { ...candidate, sourceWebUrl: url, updatedAt: now() }
+        : candidate),
+    }))
+    await platform.openExternalUrl(url)
+  }
+
+  async function openProjectWebSource(project: ProjectRecord): Promise<void> {
+    const url = normalizeMicrosoft365Url(project.sourceWebUrl ?? '')
+    if (!url) throw new Error('The saved Microsoft 365 shortcut is not a supported SharePoint or Teams address.')
+    if (!platform.openExternalUrl) {
+      throw new Error('Opening Microsoft 365 links requires the KPIntelligence desktop app.')
+    }
+    await platform.openExternalUrl(url)
   }
 
   async function importSessionFiles(project: ProjectRecord, files: File[]): Promise<void> {
@@ -1782,7 +2025,7 @@ export default function KPIntelligenceShell() {
           sourceMessage={selectedSource?.message ?? 'Choose a synced SharePoint or OneDrive folder.'}
           exportProfile={exportProfile}
           onChange={updateDashboard}
-          onChooseSource={() => void chooseSource(selectedProject)}
+          onChooseSource={() => setSourceConnectionProjectId(selectedProject.id)}
           onImportFiles={(files) => void importSessionFiles(selectedProject, files)}
           onRefreshSource={() => void refreshProject(selectedProject)}
           onOpenExport={() => setExportOpen(true)}
@@ -1804,7 +2047,12 @@ export default function KPIntelligenceShell() {
         persistentFolders={platform.supportsPersistentFolders}
         onOpen={(dashboard) => select({ kind: 'dashboard', id: dashboard.id })}
         onCreateDashboard={() => setCreateRequest({ kind: 'dashboard', projectId: selectedProject.id })}
-        onChooseSource={() => void chooseSource(selectedProject)}
+        onChooseSource={() => setSourceConnectionProjectId(selectedProject.id)}
+        onOpenWebSource={() => {
+          void openProjectWebSource(selectedProject).catch((error) => {
+            showLibraryNotice(error instanceof Error ? error.message : 'The Microsoft 365 location could not be opened.')
+          })
+        }}
         onRefresh={() => void refreshProject(selectedProject)}
       />
     )
@@ -1854,7 +2102,8 @@ export default function KPIntelligenceShell() {
       <HomeView
         store={store}
         onOpen={(dashboard) => select({ kind: 'dashboard', id: dashboard.id })}
-        onCreateDashboard={() => setCreateRequest({ kind: 'dashboard', projectId: store.projects[0]?.id ?? '' })}
+        onCreateProject={() => setCreateRequest({ kind: 'project', folderId: null })}
+        onCreateDashboard={() => setCreateRequest({ kind: 'dashboard', projectId: '' })}
       />
     )
   }
@@ -1867,10 +2116,7 @@ export default function KPIntelligenceShell() {
         onSelect={select}
         onCreateFolder={(parentId) => setCreateRequest({ kind: 'folder', parentId })}
         onCreateProject={(folderId) => setCreateRequest({ kind: 'project', folderId })}
-        onCreateDashboard={(projectId) => {
-          if (projectId) setCreateRequest({ kind: 'dashboard', projectId })
-          else setCreateRequest({ kind: 'project', folderId: null })
-        }}
+        onCreateDashboard={(projectId) => setCreateRequest({ kind: 'dashboard', projectId })}
         onAddTeamLibrary={() => void addTeamLibrary()}
         onImportPackage={() => packageInputRef.current?.click()}
         onRefreshTeamLibrary={(id) => {
@@ -1927,7 +2173,24 @@ export default function KPIntelligenceShell() {
           <button type="button" onClick={() => setLibraryNotice(null)} aria-label="Dismiss notice"><X size={14} /></button>
         </div>
       )}
-      <CreateModal request={createRequest} projects={store.projects} onClose={() => setCreateRequest(null)} onCreate={createEntity} />
+      <CreateModal
+        request={createRequest}
+        projects={store.projects}
+        persistentFolders={platform.supportsPersistentFolders}
+        onClose={() => setCreateRequest(null)}
+        onCreate={createEntity}
+      />
+      <SourceConnectionModal
+        project={sourceConnectionProject}
+        recentFolders={recentSourceFolders}
+        onClose={() => setSourceConnectionProjectId(null)}
+        onChooseFolder={(defaultPath) => sourceConnectionProject
+          ? chooseSource(sourceConnectionProject, defaultPath)
+          : Promise.resolve(false)}
+        onSaveAndOpenUrl={(url) => sourceConnectionProject
+          ? saveAndOpenProjectWebUrl(sourceConnectionProject.id, url)
+          : Promise.resolve()}
+      />
       <ShareDashboardModal
         open={shareOpen}
         dashboard={selectedDashboard}

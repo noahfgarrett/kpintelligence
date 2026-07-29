@@ -76,6 +76,31 @@ test('dashboard packages download and install as editable copies', async ({ page
   await expect(page.getByLabel('Dashboard name')).toHaveValue('Portable Operations v1.2.3')
 })
 
+test('projects created from Home stay separate from the featured OAC project', async ({ page }) => {
+  await page.getByRole('button', { name: 'Home' }).click()
+  await page.getByRole('button', { name: 'New project' }).click()
+  const projectDialog = page.getByRole('dialog', { name: 'Create project' })
+  await projectDialog.getByLabel('Name').fill('North Campus')
+  await projectDialog.getByRole('button', { name: 'Create' }).click()
+
+  await expect(page.getByRole('heading', { name: 'North Campus' })).toBeVisible()
+  await expect(page.locator('.project-row').filter({ hasText: 'North Campus' })).toBeVisible()
+  await expect(page.locator('.project-row').filter({ hasText: 'OAC Weekly Reporting' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Home' }).click()
+  await page.getByRole('button', { name: 'New dashboard' }).click()
+  const dashboardDialog = page.getByRole('dialog', { name: 'Create dashboard' })
+  await expect(dashboardDialog.getByLabel('Project')).toHaveValue('')
+  await expect(dashboardDialog.getByRole('button', { name: 'Create' })).toBeDisabled()
+  await dashboardDialog.getByLabel('Project').selectOption({ label: 'North Campus' })
+  await dashboardDialog.getByLabel('Name').fill('North Campus Overview')
+  await dashboardDialog.getByRole('button', { name: 'Create' }).click()
+
+  await expect(page.getByLabel('Dashboard name')).toHaveValue('North Campus Overview')
+  await page.getByRole('button', { name: 'Back to project' }).click()
+  await expect(page.getByRole('heading', { name: 'North Campus' })).toBeVisible()
+})
+
 test('folders, projects, dashboards, spreadsheet profiling, and the visual studio work end to end', async ({ page }, testInfo) => {
   testInfo.setTimeout(90_000)
 

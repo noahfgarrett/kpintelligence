@@ -6,7 +6,7 @@ KPIntelligence turns spreadsheets in locally synced SharePoint or OneDrive folde
 
 The production OAC Weekly QA/QC dashboard is the first featured template and remains available alongside user-created dashboards.
 
-Version 0.3.0 turns the dashboard studio into an end-to-end authoring workflow. It supports guided spreadsheet intake and repair, quick chart suggestions, direct field roles, reusable calculation recipes, multi-select page or dashboard slicers, interactive cross-filtering, 18 visual types, drag-and-resize pages, row drill-through, portable dashboard packages, Team Libraries, and configurable exports. Guarded joins, live linked calculated fields, richer period comparisons, and native editable PowerPoint text and table objects remain roadmap work.
+Version 0.3.1 makes the workspace project-first. Projects can be created directly from Home, dashboard creation requires an explicit project when context is ambiguous, and the Microsoft 365 connection center links a saved Teams or SharePoint shortcut to the local synced folder KPIntelligence watches. Version 0.3.0 introduced guided spreadsheet intake and repair, quick chart suggestions, direct field roles, calculation recipes, multi-select slicers, cross-filtering, portable dashboard packages, Team Libraries, and configurable exports.
 
 ## Product Model
 
@@ -33,6 +33,7 @@ Every custom visual keeps its source and rule sentence visible, reports matched-
 ## Local-First Data
 
 - Absolute SharePoint and OneDrive paths stay only in app data under the user's local operating-system profile.
+- Optional SharePoint or Teams web shortcuts are stored locally and can only open approved Microsoft 365 HTTPS locations.
 - Spreadsheet rows are read into memory and are not copied into an application database.
 - Dashboard definitions persist separately from source data.
 - Incomplete syncs never replace the last valid source snapshot.

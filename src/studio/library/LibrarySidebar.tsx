@@ -425,6 +425,11 @@ export default function LibrarySidebar({
   const rootFolders = store.folders.filter((folder) => folder.parentId === null)
   const rootProjects = store.projects.filter((project) => project.folderId === null)
   const favoriteDashboards = store.dashboards.filter((dashboard) => dashboard.favorite)
+  const contextualProjectId = store.selection.kind === 'project'
+    ? store.selection.id
+    : store.selection.kind === 'dashboard'
+      ? store.dashboards.find((dashboard) => dashboard.id === store.selection.id)?.projectId ?? ''
+      : ''
 
   return (
     <aside
@@ -459,11 +464,11 @@ export default function LibrarySidebar({
         </button>
         {newMenuOpen && (
           <div className="library-new-menu" role="menu">
-            <button role="menuitem" type="button" onClick={() => { onCreateDashboard(store.projects[0]?.id ?? ''); setNewMenuOpen(false) }}>
-              <FileBarChart size={16} /><span><strong>Dashboard</strong><small>Build a custom report</small></span>
-            </button>
             <button role="menuitem" type="button" onClick={() => { onCreateProject(null); setNewMenuOpen(false) }}>
               <BarChart3 size={16} /><span><strong>Project</strong><small>Group dashboards and data</small></span>
+            </button>
+            <button role="menuitem" type="button" onClick={() => { onCreateDashboard(contextualProjectId); setNewMenuOpen(false) }}>
+              <FileBarChart size={16} /><span><strong>Dashboard</strong><small>Build a custom report</small></span>
             </button>
             <button role="menuitem" type="button" onClick={() => { onCreateFolder(null); setNewMenuOpen(false) }}>
               <FolderPlus size={16} /><span><strong>Folder</strong><small>Organize projects</small></span>
@@ -567,7 +572,10 @@ export default function LibrarySidebar({
         <section className="library-section tree">
           <div className="library-section-heading">
             <h2>Library</h2>
-            <button type="button" onClick={() => onCreateFolder(null)} aria-label="New folder" title="New folder"><FolderPlus size={14} /></button>
+            <div>
+              <button type="button" onClick={() => onCreateProject(null)} aria-label="Create project in library" title="New project"><Plus size={14} /></button>
+              <button type="button" onClick={() => onCreateFolder(null)} aria-label="New folder" title="New folder"><FolderPlus size={14} /></button>
+            </div>
           </div>
           <div
             className="library-tree"

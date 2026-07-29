@@ -13,6 +13,7 @@ export interface SaveFileFilter {
 export interface DirectoryPickerOptions {
   title?: string
   canCreateDirectories?: boolean
+  defaultPath?: string
 }
 
 export interface ListFileOptions {
@@ -44,6 +45,7 @@ export interface PlatformBridge {
   saveState<T>(key: string, value: T): Promise<void>
   saveFile(data: Uint8Array, defaultName: string, filters: SaveFileFilter[]): Promise<string | null>
   writeFileInDirectory?(directory: string, fileName: string, data: Uint8Array): Promise<string>
+  openExternalUrl?(url: string): Promise<void>
   checkForUpdate(): Promise<DesktopUpdateInfo | null>
   installUpdate(info: DesktopUpdateInfo, onProgress?: (progress: UpdateProgress) => void): Promise<void>
 }

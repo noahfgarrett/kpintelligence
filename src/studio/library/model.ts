@@ -27,6 +27,7 @@ export interface ProjectRecord {
   description: string
   folderId: string | null
   sourceFolder: string | null
+  sourceWebUrl?: string | null
   sourceFileCount: number
   sourceDatasetCount: number
   sourceRefreshedAt: string | null
