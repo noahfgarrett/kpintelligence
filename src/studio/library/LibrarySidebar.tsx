@@ -36,6 +36,7 @@ type TreeItemKind = 'folder' | 'project' | 'dashboard'
 interface LibrarySidebarProps {
   store: LibraryStore
   updateAvailable: boolean
+  updateChecking: boolean
   onSelect: (selection: LibrarySelection) => void
   onCreateFolder: (parentId: string | null) => void
   onCreateProject: (folderId: string | null) => void
@@ -88,6 +89,7 @@ function keyboardActivate(event: React.KeyboardEvent, action: () => void): void 
 export default function LibrarySidebar({
   store,
   updateAvailable,
+  updateChecking,
   onSelect,
   onCreateFolder,
   onCreateProject,
@@ -599,8 +601,20 @@ export default function LibrarySidebar({
       </nav>
 
       <footer className="library-footer">
-        <span>Private, local-first</span>
-        <strong>Created by Noah Garrett</strong>
+        <div>
+          <span>Private, local-first</span>
+          <strong>Created by Noah Garrett</strong>
+        </div>
+        <button
+          className={`library-version-button ${updateAvailable ? 'available' : ''}`}
+          type="button"
+          onClick={onShowUpdates}
+          aria-label={`Version ${__APP_VERSION__}. Check for updates`}
+          title="Check for updates"
+        >
+          <RefreshCw size={11} className={updateChecking ? 'spin' : undefined} />
+          v{__APP_VERSION__}
+        </button>
       </footer>
     </aside>
   )

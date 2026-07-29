@@ -807,6 +807,7 @@ export default function KPIntelligenceShell() {
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const latestSaveRevisionRef = useRef(store.revision)
   const noticeTimerRef = useRef<number | null>(null)
+  const updateCheckInFlightRef = useRef(false)
 
   const showLibraryNotice = useCallback((message: string): void => {
     if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current)
@@ -936,23 +937,34 @@ export default function KPIntelligenceShell() {
     return folders
   }, [store.projects, sourceConnectionProjectId])
 
-  const checkUpdates = useCallback(async (): Promise<void> => {
-    if (updateChecking) return
+  const checkUpdates = useCallback(async (
+    { promptIfAvailable = false }: { promptIfAvailable?: boolean } = {},
+  ): Promise<void> => {
+    if (updateCheckInFlightRef.current) return
+    updateCheckInFlightRef.current = true
     setUpdateChecking(true)
     setUpdateCheckError(null)
     try {
-      setUpdateInfo(await checkForUpdate())
+      const info = await checkForUpdate()
+      setUpdateInfo(info)
       setLastUpdateCheck(new Date())
+      if (info && promptIfAvailable) setUpdateOpen(true)
     } catch {
       setUpdateCheckError('Check your network or proxy, then try again.')
     } finally {
+      updateCheckInFlightRef.current = false
       setUpdateChecking(false)
     }
-  }, [updateChecking])
+  }, [])
 
   useEffect(() => {
-    if (import.meta.env.PROD) void checkUpdates()
-  }, [])
+    if (import.meta.env.PROD) void checkUpdates({ promptIfAvailable: true })
+  }, [checkUpdates])
+
+  const showUpdates = useCallback((): void => {
+    setUpdateOpen(true)
+    void checkUpdates()
+  }, [checkUpdates])
 
   const refreshOacProject = useCallback(async (project: ProjectRecord): Promise<void> => {
     if (!project.sourceFolder) return
@@ -2113,6 +2125,7 @@ export default function KPIntelligenceShell() {
       <LibrarySidebar
         store={store}
         updateAvailable={Boolean(updateInfo)}
+        updateChecking={updateChecking}
         onSelect={select}
         onCreateFolder={(parentId) => setCreateRequest({ kind: 'folder', parentId })}
         onCreateProject={(folderId) => setCreateRequest({ kind: 'project', folderId })}
@@ -2146,7 +2159,7 @@ export default function KPIntelligenceShell() {
             : [...current.expandedProjectIds, id],
         }))}
         onMove={moveItem}
-        onShowUpdates={() => setUpdateOpen(true)}
+        onShowUpdates={showUpdates}
       />
       <div className="kp-content">{content}</div>
       <input
@@ -2219,7 +2232,7 @@ export default function KPIntelligenceShell() {
         checking={updateChecking}
         checkError={updateCheckError}
         lastChecked={lastUpdateCheck}
-        onCheck={checkUpdates}
+        onCheck={() => checkUpdates()}
       />
       <ExportProfileModal
         open={exportOpen}

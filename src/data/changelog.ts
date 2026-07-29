@@ -7,6 +7,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.3.2',
+    date: '2026-07-29T13:51:00Z',
+    type: 'fix',
+    notes: [
+      'Made signed desktop updates automatically prompt when a newer version is found on every app launch',
+      'Added a clickable version control in the library footer that performs a fresh update check and opens the changelog',
+      'Changed the existing update bell to refresh the release feed whenever it is opened',
+      'Clarified that dismissing an available update means not now and does not permanently skip that release',
+      'Added end-to-end regression coverage for manual update discovery and the version status experience',
+    ],
+  },
+  {
     version: '0.3.1',
     date: '2026-07-29T13:01:02Z',
     type: 'fix',

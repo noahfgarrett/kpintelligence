@@ -21,6 +21,18 @@ test.afterEach(async ({ page }) => {
   expect(browserErrors.get(page) ?? []).toEqual([])
 })
 
+test('version control performs a manual update check and opens the changelog', async ({ page }) => {
+  const versionButton = page.getByRole('button', { name: /Version .+ Check for updates/ })
+  await expect(versionButton).toBeVisible()
+  await versionButton.click()
+
+  const changelog = page.getByRole('dialog', { name: 'Changelog' })
+  await expect(changelog).toBeVisible()
+  await expect(changelog.getByText(/is up to date/)).toBeVisible()
+  await expect(changelog.getByText(/Last checked/)).toBeVisible()
+  await expect(changelog.getByRole('button', { name: 'Check now' })).toBeVisible()
+})
+
 test('featured OAC dashboard remains usable inside the library shell', async ({ page }) => {
   await expect(page.getByText('KPIntelligence', { exact: true }).first()).toBeVisible()
   await expect(page.getByRole('button', { name: /Weekly QA\/QC Report/ }).first()).toBeVisible()

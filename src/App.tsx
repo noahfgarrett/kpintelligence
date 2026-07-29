@@ -273,7 +273,7 @@ export function UpdateModal({
             )}
             {downloadError && <p className="download-error">{downloadError}</p>}
             <div className="modal-actions">
-              <button className="button secondary" type="button" onClick={onClose}>Skip this version</button>
+              <button className="button secondary" type="button" onClick={onClose}>Not now</button>
               <button
                 className="button primary"
                 type="button"
@@ -317,7 +317,7 @@ export function UpdateModal({
                 {checkError
                   || (lastChecked
                     ? `Last checked ${lastChecked.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
-                    : 'Checks automatically while the app is open')}
+                    : 'Checks automatically when KPIntelligence opens')}
               </span>
             </div>
             <button className="button secondary compact" type="button" disabled={checking} onClick={() => void onCheck()}>
